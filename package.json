@@ -1,0 +1,17 @@
+{
+  "name": "god-sim",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A 2D god simulation where creatures live, learn, and invent their own languages.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.8"
+  }
+}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>God Sim — observe the nature of things</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <!-- Top bar: simulation speed + world info -->
+    <div id="topbar" class="panel">
+      <span class="brand">GOD&nbsp;SIM</span>
+      <div class="speed">
+        <button data-speed="0" title="Pause">⏸</button>
+        <button data-speed="1" class="active" title="Normal">▶</button>
+        <button data-speed="3" title="Fast">▶▶</button>
+        <button data-speed="8" title="Hyper">▶▶▶</button>
+      </div>
+      <span id="clock" class="readout"></span>
+      <span id="census" class="readout"></span>
+    </div>
+
+    <!-- Left: god tools -->
+    <div id="tools" class="panel">
+      <div class="panel-title">Divine Powers</div>
+      <div id="tool-buttons"></div>
+      <div class="hint" id="tool-hint"></div>
+    </div>
+
+    <!-- Right: tabbed knowledge panels -->
+    <div id="sidebar" class="panel">
+      <div class="tabs">
+        <button data-tab="inspect" class="active">Inspect</button>
+        <button data-tab="dict">Languages</button>
+        <button data-tab="log">Chronicle</button>
+      </div>
+      <div id="tab-inspect" class="tab-body"></div>
+      <div id="tab-dict" class="tab-body hidden"></div>
+      <div id="tab-log" class="tab-body hidden"></div>
+    </div>
+
+    <div id="help" class="panel">
+      Drag to pan · Scroll to zoom · Pick a power on the left, then click the world
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
