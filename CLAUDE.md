@@ -15,6 +15,7 @@ support), and watch creatures live, learn, and invent their own languages.
   naming. Use plain, descriptive branch names.
 - **Pushing:** Never `git push` or open a PR without the owner's explicit
   consent. Commit locally as work progresses; wait for the go-ahead to push.
+- **Default branch:** Push all changes to `main`. (`god-sim` is left as-is.)
 
 ## Tech stack
 
