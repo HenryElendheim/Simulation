@@ -89,28 +89,46 @@ export class Renderer {
       }
 
       if (c.speech && cam.zoom > 0.55) {
-        this.drawBubble(sx, sy - r - 4, c.speech);
+        this.drawBubble(sx, sy - r - 4, c.speech, c.speechGloss);
       }
     }
   }
 
-  private drawBubble(sx: number, sy: number, text: string): void {
+  private drawBubble(sx: number, sy: number, text: string, gloss: string): void {
     const ctx = this.ctx;
-    ctx.font = "11px ui-monospace, monospace";
-    const w = ctx.measureText(text).width + 10;
-    ctx.fillStyle = "rgba(12,15,20,0.85)";
+    const wordFont = "11px ui-monospace, monospace";
+    const glossFont = "9px ui-monospace, monospace";
+    ctx.font = wordFont;
+    const wordW = ctx.measureText(text).width;
+    ctx.font = glossFont;
+    const glossW = gloss ? ctx.measureText(gloss).width : 0;
+
+    const pad = 6;
+    const w = Math.max(wordW, glossW) + pad * 2;
+    const h = gloss ? 26 : 15;
+    const x = sx - w / 2;
+    const y = sy - h - 1;
+
+    ctx.fillStyle = "rgba(12,15,20,0.88)";
     ctx.strokeStyle = "rgba(111,211,199,0.6)";
     ctx.lineWidth = 1;
-    const x = sx - w / 2;
-    const y = sy - 16;
     ctx.beginPath();
-    ctx.roundRect(x, y, w, 15, 4);
+    ctx.roundRect(x, y, w, h, 4);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#cdeee9";
+
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    // Spoken words.
+    ctx.font = wordFont;
+    ctx.fillStyle = "#cdeee9";
     ctx.fillText(text, sx, y + 8);
+    // Meaning, dimmer, underneath.
+    if (gloss) {
+      ctx.font = glossFont;
+      ctx.fillStyle = "#8190a3";
+      ctx.fillText(gloss, sx, y + 18);
+    }
     ctx.textAlign = "left";
   }
 }

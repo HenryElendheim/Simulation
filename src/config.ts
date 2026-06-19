@@ -22,6 +22,13 @@ export const Creature = {
   speed: 26, // world px / sec
   radius: 5,
   senseRadius: 70, // how far they perceive food/water/others
+  // Need management with hysteresis: act once a need passes the "urge" line,
+  // then keep going until it's topped up below the "sated" line. This makes
+  // them eat/drink to near-full so they don't have to fetch again soon.
+  hungerUrge: 0.5,
+  thirstUrge: 0.5,
+  satedHunger: 0.08,
+  satedThirst: 0.08,
   adultAge: 0.5, // days
   maxAge: 28, // days (with variance)
   breedCooldown: 6, // days

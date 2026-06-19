@@ -1,4 +1,5 @@
 import { Creature as C, Needs, SECONDS_PER_DAY, TILE } from "./config";
+import { CONCEPTS } from "./language";
 import type { ConceptId, Tribe } from "./language";
 import type { Simulation } from "./sim";
 import { isWater, Tile } from "./world";
@@ -34,14 +35,22 @@ export class Creature {
   lastBreed = -999;
 
   action: Action = "wander";
+  /**
+   * What the creature is committed to right now. Using a sticky goal (instead of
+   * re-deciding from scratch every tick) gives hysteresis: once they start
+   * eating/drinking they finish until nearly full, so they don't have to go
+   * fetch food/water again moments later.
+   */
+  private goal: "none" | "food" | "water" = "none";
   targetX = 0;
   targetY = 0;
   targetFood: FoodSource | null = null;
 
   /** Concepts this individual personally knows the word for. */
   vocabulary = new Set<ConceptId>();
-  /** Current speech bubble. */
+  /** Current speech bubble: the spoken words and their plain meaning. */
   speech = "";
+  speechGloss = "";
   private speechUntil = 0;
   private nextSpeak = 0;
   private wanderUntil = 0;
@@ -78,7 +87,10 @@ export class Creature {
     this.tryBreed(sim);
     this.maybeSpeak(sim);
 
-    if (this.speechUntil < sim.timeDays) this.speech = "";
+    if (this.speechUntil < sim.timeDays) {
+      this.speech = "";
+      this.speechGloss = "";
+    }
   }
 
   /**
@@ -126,22 +138,34 @@ export class Creature {
     }
   }
 
-  /** Utility-style action selection: satisfy the most pressing need. */
+  /** Utility-style action selection with sticky goals (see `goal` field). */
   private decide(sim: Simulation): void {
     // Finish sleeping only once rested.
     if (this.action === "sleep" && this.energy < 0.95) return;
 
-    if (this.thirst > 0.55 && this.thirst >= this.hunger) {
-      const w = sim.nearestWaterTile(this.x, this.y, 600);
+    // Drop a goal once the need is nearly fully topped up.
+    if (this.goal === "water" && this.thirst <= C.satedThirst) this.goal = "none";
+    if (this.goal === "food" && this.hunger <= C.satedHunger) this.goal = "none";
+
+    // Pick up a new goal only when a need first crosses the "act now" line.
+    if (this.goal === "none") {
+      if (this.thirst > C.thirstUrge && this.thirst >= this.hunger) this.goal = "water";
+      else if (this.hunger > C.hungerUrge) this.goal = "food";
+    }
+
+    // Pursue the active goal all the way to satiation.
+    if (this.goal === "water") {
+      const w = sim.nearestWaterTile(this.x, this.y, 800);
       if (w) {
         this.targetX = w.x;
         this.targetY = w.y;
         this.action = dist(this.x, this.y, w.x, w.y) < TILE * 1.5 ? "drink" : "seekWater";
         return;
       }
+      this.goal = "none"; // nowhere to drink — give up for now
     }
-    if (this.hunger > 0.5) {
-      const f = sim.nearestFood(this.x, this.y, 600);
+    if (this.goal === "food") {
+      const f = sim.nearestFood(this.x, this.y, 800);
       if (f) {
         this.targetFood = f;
         this.targetX = f.x;
@@ -149,7 +173,9 @@ export class Creature {
         this.action = dist(this.x, this.y, f.x, f.y) < TILE ? "eat" : "seekFood";
         return;
       }
+      this.goal = "none"; // no food in reach
     }
+
     if (this.energy < 0.25) {
       this.action = "sleep";
       return;
@@ -175,9 +201,9 @@ export class Creature {
         this.energy = clamp01(this.energy + Needs.energyRest * dt);
         return;
       case "drink":
+        // Keep drinking; decide() ends it once nearly fully hydrated.
         this.vx = this.vy = 0;
-        this.thirst = clamp01(this.thirst - 0.5 * dt * 4);
-        if (this.thirst <= 0.05) this.action = "wander";
+        this.thirst = clamp01(this.thirst - 2 * dt);
         return;
       case "eat": {
         this.vx = this.vy = 0;
@@ -185,9 +211,10 @@ export class Creature {
         if (f && f.hasFood && dist(this.x, this.y, f.x, f.y) < TILE) {
           this.hunger = clamp01(this.hunger - f.bite() * 0.25);
           sim.experience(this, "eat");
-          if (this.hunger <= 0.1 || !f.hasFood) this.action = "wander";
         } else {
-          this.action = "wander";
+          // Bush empty or out of reach: drop it so decide() finds another while
+          // still hungry, or moves on once nearly full.
+          this.targetFood = null;
         }
         return;
       }
@@ -254,12 +281,10 @@ export class Creature {
     this.nextSpeak = sim.timeDays + sim.rng.range(0.3, 1.2);
 
     const say = (...concepts: ConceptId[]): void => {
-      const words = concepts
-        .filter((c) => this.vocabulary.has(c))
-        .map((c) => this.tribe.lexicon.get(c)!)
-        .filter(Boolean);
-      if (!words.length) return;
-      this.speech = words.join(" ");
+      const known = concepts.filter((c) => this.vocabulary.has(c) && this.tribe.lexicon.has(c));
+      if (!known.length) return;
+      this.speech = known.map((c) => this.tribe.lexicon.get(c)!).join(" ");
+      this.speechGloss = known.map((c) => CONCEPTS[c].gloss).join(" ");
       this.speechUntil = sim.timeDays + 0.12;
     };
 

@@ -121,7 +121,7 @@ export class UI {
       <div class="kv"><span>Tribe</span><span><span class="swatch" style="background:${c.tribe.color}"></span>${c.tribe.name}</span></div>
       <div class="kv"><span>Age</span><span>${c.age.toFixed(1)} d ${c.isAdult ? "(adult)" : "(young)"}</span></div>
       <div class="kv"><span>Doing</span><span>${c.action}</span></div>
-      ${c.speech ? `<div class="kv"><span>Says</span><span class="word">"${c.speech}"</span></div>` : ""}
+      ${c.speech ? `<div class="kv"><span>Says</span><span class="word">"${c.speech}"</span></div><div class="kv"><span></span><span class="gloss">${c.speechGloss}</span></div>` : ""}
       <hr style="border-color:#1a2029">
       ${bar("Health", c.health, "#6fe09c")}
       ${bar("Fullness", 1 - c.hunger, "#e0a86f")}
