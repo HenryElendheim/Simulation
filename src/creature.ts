@@ -23,6 +23,8 @@ let NEXT_ID = 1;
 export class Creature {
   id = NEXT_ID++;
   alive = true;
+  /** Optional name you can give an individual in the editor. */
+  name = "";
 
   // Position & motion in world pixels.
   vx = 0;

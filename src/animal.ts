@@ -1,9 +1,9 @@
-import { HERD_DENSITY_CAP, HERD_DENSITY_RADIUS, SECONDS_PER_DAY, type SpeciesDef } from "./config";
+import { HERD_DENSITY_CAP, HERD_DENSITY_RADIUS, SECONDS_PER_DAY, TILE, type SpeciesDef } from "./config";
 import type { Creature } from "./creature";
 import type { Simulation } from "./sim";
 import { Layer } from "./world";
 
-type AnimalState = "wander" | "flee" | "seekFood" | "eat" | "hunt";
+type AnimalState = "wander" | "flee" | "seekFood" | "eat" | "drink" | "hunt";
 
 let NEXT_ID = 1;
 
@@ -20,6 +20,7 @@ export class Animal {
   vy = 0;
 
   hunger = 0.3;
+  thirst = 0.3;
   health = 1;
   age = 0;
   maxAge: number;
@@ -46,16 +47,19 @@ export class Animal {
     // between kills while waiting for catchable (young) prey.
     const hungerRate = this.species.diet === "carnivore" ? 0.006 : 0.012;
     this.hunger = clamp01(this.hunger + hungerRate * dt);
+    // Land animals get thirsty and must drink; fish live in water already.
+    if (this.species.habitat === "land") this.thirst = clamp01(this.thirst + 0.01 * dt);
 
-    if (this.hunger >= 1) this.health = clamp01(this.health - 0.05 * dt);
-    else if (this.hunger < 0.5) this.health = clamp01(this.health + 0.01 * dt);
+    if (this.hunger >= 1 || this.thirst >= 1) this.health = clamp01(this.health - 0.05 * dt);
+    else if (this.hunger < 0.5 && this.thirst < 0.5) this.health = clamp01(this.health + 0.01 * dt);
 
     if (this.health <= 0 || this.age >= this.maxAge) {
       sim.killAnimal(this, "nature");
       return;
     }
 
-    if (this.species.diet === "herbivore") this.herbivore(sim, dt);
+    if (this.species.habitat === "water") this.fish(sim, dt);
+    else if (this.species.diet === "herbivore") this.herbivore(sim, dt);
     else this.carnivore(sim, dt);
 
     this.tryBreed(sim);
@@ -75,6 +79,21 @@ export class Animal {
       this.moveToward(sim, this.targetX, this.targetY, dt, 1.25);
       return;
     }
+    // Thirsty? Find the water's edge and drink.
+    if (this.thirst > 0.5 && this.thirst >= this.hunger) {
+      const w = sim.nearestWaterTile(this.x, this.y, 500);
+      if (w) {
+        if (dist(this.x, this.y, w.x, w.y) < TILE * 1.5) {
+          this.state = "drink";
+          this.vx = this.vy = 0;
+          this.thirst = clamp01(this.thirst - 0.5 * dt);
+        } else {
+          this.state = "seekFood";
+          this.moveToward(sim, w.x, w.y, dt);
+        }
+        return;
+      }
+    }
     if (this.hunger > 0.45) {
       // Graze the vegetation underfoot; otherwise head to the nearest pasture.
       // (Grazing grass, not berry bushes, keeps them from starving the people.)
@@ -90,6 +109,19 @@ export class Animal {
         this.moveToward(sim, g.x, g.y, dt);
         return;
       }
+    }
+    this.wander(sim, dt);
+  }
+
+  // -- Fish: drift through the water and nibble ------------------------------
+
+  private fish(sim: Simulation, dt: number): void {
+    if (this.hunger > 0.45) {
+      // Plankton is everywhere in the water, so they just feed where they swim.
+      this.state = "eat";
+      this.vx = this.vy = 0;
+      this.hunger = clamp01(this.hunger - 0.2 * dt);
+      return;
     }
     this.wander(sim, dt);
   }
@@ -172,8 +204,13 @@ export class Animal {
     const speed = this.species.speed * (this.isAdult ? 1 : 0.7) * speedScale;
     const nx = this.x + (dx / d) * speed * dt;
     const ny = this.y + (dy / d) * speed * dt;
-    const okX = sim.world.walkable(this.layer, nx, this.y);
-    const okY = sim.world.walkable(this.layer, this.x, ny);
+    // Fish stay in the water; land animals stay on land.
+    const passable = (px: number, py: number): boolean =>
+      this.species.habitat === "water"
+        ? sim.world.isWaterAtPixel(px, py)
+        : sim.world.walkable(Layer.Surface, px, py);
+    const okX = passable(nx, this.y);
+    const okY = passable(this.x, ny);
     if (okX) this.x = nx;
     if (okY) this.y = ny;
     if (!okX && !okY) this.wanderUntil = 0; // cornered: repick next tick

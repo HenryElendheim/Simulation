@@ -1,5 +1,5 @@
 import { Animal } from "./animal";
-import { Creature as CC, Food, SECONDS_PER_DAY, SPECIES, Trees, TILE, type SpeciesDef } from "./config";
+import { Creature as CC, Food, Language, SECONDS_PER_DAY, SPECIES, Trees, TILE, type SpeciesDef } from "./config";
 import { Creature } from "./creature";
 import {
   CONCEPTS,
@@ -61,11 +61,11 @@ export class Simulation {
       if (spot) this.trees.push(new Tree(spot.x, spot.y, this.rng.range(0.5, 1)));
     }
 
-    // Seed the food chain: herbivores graze, carnivores hunt them.
+    // Seed the food chain and the simple animals (cows, chickens, fish, ...).
     for (const sp of Object.values(SPECIES)) {
       for (let i = 0; i < sp.startCount; i++) {
-        const land = this.world.randomLand(this.rng);
-        if (land) this.spawnAnimal(sp, land.x, land.y, this.rng.range(0, sp.maxAge * 0.6));
+        const spot = sp.habitat === "water" ? this.world.randomWater(this.rng) : this.world.randomLand(this.rng);
+        if (spot) this.spawnAnimal(sp, spot.x, spot.y, this.rng.range(0, sp.maxAge * 0.6));
       }
     }
 
@@ -186,9 +186,9 @@ export class Simulation {
     return this.nearestAnimal(x, y, radius, (a) => a.species.diet === "carnivore");
   }
 
-  /** Nearest living herbivore (huntable game). */
+  /** Nearest living land herbivore (game a land predator can actually reach). */
   nearestHuntable(x: number, y: number, radius: number): Animal | null {
-    return this.nearestAnimal(x, y, radius, (a) => a.species.diet === "herbivore");
+    return this.nearestAnimal(x, y, radius, (a) => a.species.diet === "herbivore" && a.species.habitat === "land");
   }
 
   /**
@@ -283,11 +283,32 @@ export class Simulation {
    * of a brand-new word, and record that this individual now knows it.
    */
   experience(c: Creature, concept: ConceptId): void {
-    const { word, coined } = nameConcept(c.tribe, concept);
-    if (coined) {
+    if (!c.tribe.lexicon.has(concept)) {
+      // Brand-new idea: only sometimes does it click into a coined word, so
+      // languages build up gradually from nothing as life goes on.
+      if (!this.rng.chance(Language.nameChance)) return;
+      const { word } = nameConcept(c.tribe, concept);
       this.addLog(`${c.tribe.name} coin "${word}" — meaning "${CONCEPTS[concept].gloss}".`, "lang");
+      c.vocabulary.add(concept);
+      return;
     }
-    c.vocabulary.add(concept);
+    // The tribe has the word; this individual learns it gradually.
+    if (!c.vocabulary.has(concept) && this.rng.chance(Language.learnChance)) {
+      c.vocabulary.add(concept);
+    }
+  }
+
+  /** Editor helper: give a creature (and its tribe) words for every concept. */
+  teachAllWords(c: Creature): void {
+    for (const concept of Object.keys(CONCEPTS) as ConceptId[]) {
+      nameConcept(c.tribe, concept);
+      c.vocabulary.add(concept);
+    }
+  }
+
+  /** Editor helper: wipe an individual's known words (its tribe keeps theirs). */
+  forgetAllWords(c: Creature): void {
+    c.vocabulary.clear();
   }
 
   // ---- Life events ---------------------------------------------------------
@@ -317,7 +338,13 @@ export class Simulation {
   }
 
   spawnAnimal(species: SpeciesDef, x: number, y: number, age: number): Animal | null {
-    if (isWater(this.world.tileAtPixel(x, y))) {
+    const inWater = isWater(this.world.tileAtPixel(x, y));
+    if (species.habitat === "water" && !inWater) {
+      const spot = this.world.randomWater(this.rng);
+      if (!spot) return null;
+      x = spot.x;
+      y = spot.y;
+    } else if (species.habitat === "land" && inWater) {
       const land = this.world.randomLand(this.rng);
       if (!land) return null;
       x = land.x;

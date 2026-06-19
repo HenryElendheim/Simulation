@@ -5,7 +5,7 @@ import { Layer } from "./world";
 
 export type ToolId =
   | "inspect" | "food" | "spawn" | "tribe"
-  | "grazer" | "hunter" | "dig"
+  | "grazer" | "hunter" | "cow" | "chicken" | "fish" | "dig"
   | "smite" | "raise" | "lower";
 
 interface ToolDef {
@@ -16,12 +16,15 @@ interface ToolDef {
 }
 
 export const TOOLS: ToolDef[] = [
-  { id: "inspect", icon: "🔍", label: "Inspect", hint: "Click a creature to study its needs, mind and words." },
+  { id: "inspect", icon: "🔍", label: "Inspect", hint: "Click a creature to inspect and EDIT every detail of it." },
   { id: "food", icon: "🍒", label: "Bless Food", hint: "Click land to make food bushes grow there." },
   { id: "spawn", icon: "✨", label: "Create", hint: "Click to shape a new creature into the world." },
   { id: "tribe", icon: "👥", label: "New People", hint: "Click to found a new tribe with its own language." },
-  { id: "grazer", icon: "🦌", label: "Herbivore", hint: "Click to place a grazer — prey at the bottom of the food chain." },
-  { id: "hunter", icon: "🐺", label: "Carnivore", hint: "Click to place a hunter-beast that preys on grazers and people." },
+  { id: "grazer", icon: "🦌", label: "Grazer", hint: "Place a wild grazer — fast prey for the food chain." },
+  { id: "hunter", icon: "🐺", label: "Predator", hint: "Place a hunter-beast that stalks and eats herbivores." },
+  { id: "cow", icon: "🐄", label: "Cow", hint: "Place a cow — a slow grazer that wanders, eats and drinks." },
+  { id: "chicken", icon: "🐔", label: "Chicken", hint: "Place a chicken — a small bird that pecks around." },
+  { id: "fish", icon: "🐟", label: "Fish", hint: "Click water to add fish that swim and feed." },
   { id: "dig", icon: "⛏️", label: "Dig", hint: "Click to carve rock on the layer you're viewing (Surface opens a cave shaft)." },
   { id: "smite", icon: "⚡", label: "Smite", hint: "Click to call down fire. Chaos. Creatures may die." },
   { id: "raise", icon: "⛰️", label: "Raise Land", hint: "Click to push the earth upward." },
@@ -111,6 +114,9 @@ export class UI {
     }
   }
 
+  private selectedId = -1;
+  private inspectorSync: (() => void) | null = null;
+
   /** Called every frame with the live sim to refresh panel contents. */
   render(sim: Simulation): void {
     document.getElementById("clock")!.textContent = `Day ${sim.day}`;
@@ -118,40 +124,115 @@ export class UI {
     document.getElementById("census")!.textContent =
       `${pop} people · ${sim.tribes.length} tribes · ${sim.animals.length} beasts`;
 
-    if (this.activeTab === "inspect") this.renderInspector();
+    if (this.activeTab === "inspect") this.updateInspector(sim);
     else if (this.activeTab === "dict") this.renderDictionary(sim);
     else this.renderLog(sim);
   }
 
-  private renderInspector(): void {
+  /** Rebuild the editor only when the selection changes; otherwise just sync values. */
+  private updateInspector(sim: Simulation): void {
+    const c = this.selected;
+    const id = c && c.alive ? c.id : -1;
+    if (id !== this.selectedId) {
+      this.selectedId = id;
+      this.buildInspector(sim);
+    } else {
+      this.inspectorSync?.();
+    }
+  }
+
+  /** Construct the editable inspector form for the selected creature. */
+  private buildInspector(sim: Simulation): void {
     const host = document.getElementById("tab-inspect")!;
     const c = this.selected;
     if (!c || !c.alive) {
-      host.innerHTML = `<div class="empty">Pick the Inspect power and click a creature.</div>`;
+      host.innerHTML = `<div class="empty">Pick the Inspect power and click a creature to edit every detail of it.</div>`;
+      this.inspectorSync = null;
       return;
     }
-    const bar = (label: string, v: number, color: string) =>
-      `<div class="kv"><span>${label}</span><span>${Math.round(v * 100)}%</span></div>
-       <div class="bar"><i style="width:${Math.round(v * 100)}%;background:${color}"></i></div>`;
 
+    const tribeOpts = sim.tribes
+      .map((t, i) => `<option value="${i}" ${t === c.tribe ? "selected" : ""}>${t.name}</option>`)
+      .join("");
+    const slider = (key: string, label: string, color: string) =>
+      `<div class="ed-slider"><div class="kv"><span>${label}</span><span data-pct="${key}"></span></div>
+       <input id="ed-${key}" type="range" min="0" max="100" style="accent-color:${color}"></div>`;
+
+    host.innerHTML = `
+      <label class="ed-row"><span>Name</span><input id="ed-name" type="text" placeholder="(unnamed)" value="${escapeAttr(c.name)}"></label>
+      <label class="ed-row"><span>Tribe</span><select id="ed-tribe">${tribeOpts}</select></label>
+      <div class="ed-row"><span>Where</span><span class="mini-toggle"><button id="ed-surface">Surface</button><button id="ed-under">Cave</button></span></div>
+      <div class="kv"><span>Doing</span><span data-ro="doing"></span></div>
+      <div class="kv"><span>Says</span><span class="word" data-ro="says"></span></div>
+      <hr style="border-color:#1a2029">
+      ${slider("health", "Health", "#6fe09c")}
+      ${slider("full", "Fullness", "#e0a86f")}
+      ${slider("hydra", "Hydration", "#6fa8e0")}
+      ${slider("energy", "Energy", "#c9a8e0")}
+      <label class="ed-row"><span>Age (days)</span><input id="ed-age" type="number" min="0" step="0.5"></label>
+      <label class="ed-row"><span>Max age</span><input id="ed-maxage" type="number" min="1" step="1"></label>
+      <div class="ed-actions">
+        <button id="ed-teach">Teach all words</button>
+        <button id="ed-forget">Forget words</button>
+        <button id="ed-kill" class="danger">Smite this one</button>
+      </div>
+      <div class="panel-title" style="margin-top:8px">Words it knows (<span data-ro="vocount"></span>)</div>
+      <div id="ed-words"></div>
+    `;
+
+    const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const name = byId<HTMLInputElement>("ed-name");
+    name.oninput = () => { c.name = name.value; };
+    const tribe = byId<HTMLSelectElement>("ed-tribe");
+    tribe.onchange = () => { c.tribe = sim.tribes[Number(tribe.value)] ?? c.tribe; this.renderWords(c); };
+    byId("ed-surface").onclick = () => { c.layer = Layer.Surface; };
+    byId("ed-under").onclick = () => { c.layer = Layer.Underground; };
+
+    const sliders = [
+      { key: "health", get: () => c.health, set: (v: number) => (c.health = v) },
+      { key: "full", get: () => 1 - c.hunger, set: (v: number) => (c.hunger = 1 - v) },
+      { key: "hydra", get: () => 1 - c.thirst, set: (v: number) => (c.thirst = 1 - v) },
+      { key: "energy", get: () => c.energy, set: (v: number) => (c.energy = v) },
+    ];
+    for (const s of sliders) {
+      const el = byId<HTMLInputElement>(`ed-${s.key}`);
+      el.oninput = () => s.set(clamp01(Number(el.value) / 100));
+    }
+    const age = byId<HTMLInputElement>("ed-age");
+    age.oninput = () => { const v = Number(age.value); if (!Number.isNaN(v)) c.age = Math.max(0, v); };
+    const maxage = byId<HTMLInputElement>("ed-maxage");
+    maxage.oninput = () => { const v = Number(maxage.value); if (!Number.isNaN(v) && v > 0) c.maxAge = v; };
+
+    byId("ed-teach").onclick = () => { sim.teachAllWords(c); this.renderWords(c); };
+    byId("ed-forget").onclick = () => { sim.forgetAllWords(c); this.renderWords(c); };
+    byId("ed-kill").onclick = () => { sim.kill(c); };
+
+    this.inspectorSync = () => {
+      const active = document.activeElement;
+      const set = (sel: string, text: string) => { const e = document.querySelector(sel); if (e) e.textContent = text; };
+      set('[data-ro="doing"]', c.action);
+      set('[data-ro="says"]', c.speech ? `"${c.speech}" — ${c.speechGloss}` : "—");
+      set('[data-ro="vocount"]', String(c.vocabulary.size));
+      for (const s of sliders) {
+        const el = byId<HTMLInputElement>(`ed-${s.key}`);
+        const v = Math.round(s.get() * 100);
+        if (el !== active) el.value = String(v);
+        set(`[data-pct="${s.key}"]`, `${v}%`);
+      }
+      if (age !== active) age.value = c.age.toFixed(1);
+      if (maxage !== active) maxage.value = String(Math.round(c.maxAge));
+    };
+    this.renderWords(c);
+    this.inspectorSync();
+  }
+
+  private renderWords(c: Creature): void {
+    const host = document.getElementById("ed-words");
+    if (!host) return;
     const words = [...c.vocabulary]
       .map((id) => `<div class="lex-row"><span class="word">${c.tribe.lexicon.get(id) ?? "…"}</span><span class="gloss">${CONCEPTS[id].gloss}</span></div>`)
       .join("");
-
-    host.innerHTML = `
-      <div class="kv"><span>Tribe</span><span><span class="swatch" style="background:${c.tribe.color}"></span>${c.tribe.name}</span></div>
-      <div class="kv"><span>Age</span><span>${c.age.toFixed(1)} d ${c.isAdult ? "(adult)" : "(young)"}</span></div>
-      <div class="kv"><span>Where</span><span>${c.layer === Layer.Underground ? "underground" : "surface"}</span></div>
-      <div class="kv"><span>Doing</span><span>${c.action}</span></div>
-      ${c.speech ? `<div class="kv"><span>Says</span><span class="word">"${c.speech}"</span></div><div class="kv"><span></span><span class="gloss">${c.speechGloss}</span></div>` : ""}
-      <hr style="border-color:#1a2029">
-      ${bar("Health", c.health, "#6fe09c")}
-      ${bar("Fullness", 1 - c.hunger, "#e0a86f")}
-      ${bar("Hydration", 1 - c.thirst, "#6fa8e0")}
-      ${bar("Energy", c.energy, "#c9a8e0")}
-      <div class="panel-title" style="margin-top:8px">Words it knows (${c.vocabulary.size})</div>
-      ${words || `<div class="empty">No words yet.</div>`}
-    `;
+    host.innerHTML = words || `<div class="empty">No words yet — it will name things as it lives.</div>`;
   }
 
   private renderDictionary(sim: Simulation): void {
@@ -188,4 +269,12 @@ export class UI {
       })
       .join("");
   }
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }

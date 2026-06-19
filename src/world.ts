@@ -123,6 +123,22 @@ export class World {
     return isGrazable(this.tileAtPixel(px, py));
   }
 
+  isWaterAtPixel(px: number, py: number): boolean {
+    return isWater(this.tileAtPixel(px, py));
+  }
+
+  /** Find a random water tile (pixel centre), for spawning fish. */
+  randomWater(rng: RNG, tries = 300): { x: number; y: number } | null {
+    for (let t = 0; t < tries; t++) {
+      const tx = rng.int(0, this.width - 1);
+      const ty = rng.int(0, this.height - 1);
+      if (isWater(this.tileAt(tx, ty))) {
+        return { x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE };
+      }
+    }
+    return null;
+  }
+
   /** Whether a creature on `layer` can stand on the tile at the given pixel. */
   walkable(layer: Layer, px: number, py: number): boolean {
     const tx = Math.floor(px / TILE);

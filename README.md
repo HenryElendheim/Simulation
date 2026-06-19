@@ -30,8 +30,26 @@ Other scripts: `npm run build` (typecheck + production build),
   **dig** shafts and tunnels to explore the caves below.
 - **A food chain of base creatures:** plants → **grazers** (herbivores that eat
   grass and flee) → **hunter-beasts** (carnivores that stalk and pounce). Herds
-  and packs form, breed, and rise and fall the way predator/prey populations do.
+  and packs form, breed, and rise and fall like real predator/prey populations.
+- **Simple animals** that just wander, eat and drink: **cows** (slow grazers),
+  **chickens** (small peckers), and **fish** that swim and feed in the water.
 - **Tribes**, each with its own colour and its own invented language.
+
+## Editing creatures
+
+Pick the **🔍 Inspect** power and click any person to open a live editor. You can
+rename it, switch its **tribe**, move it between **surface and cave**, drag
+sliders for **health / fullness / hydration / energy**, set its **age** and
+**max age**, **teach it every word** or wipe its vocabulary, or **smite** just
+that one. Everything updates the simulation immediately.
+
+## Language: starting from nothing
+
+Creatures begin knowing **no words at all**. As they live and repeatedly meet
+things — ground, water, a friend, a predator, death — a tribe gradually *coins*
+its own word for each concept, and words spread person to person. Because every
+tribe invents independently, distinct languages emerge over time. Watch the
+**Languages** tab fill in slowly as the world ages.
 
 ## Emergent language (the headline feature)
 
@@ -49,12 +67,12 @@ dictionary (word → meaning), and watch creatures speak in little bubbles.
 
 | Power | Effect |
 |-------|--------|
-| 🔍 Inspect | Click a creature to study its needs, mind and known words |
+| 🔍 Inspect | Click a creature to open its live **editor** (see above) |
 | 🍒 Bless Food | Grow food bushes where you click |
 | ✨ Create | Shape a new creature into the world |
 | 👥 New People | Found a whole new tribe with its own language |
-| 🦌 Herbivore | Place a grazer (prey) |
-| 🐺 Carnivore | Place a hunter-beast (predator) |
+| 🦌 Grazer / 🐺 Predator | Place wild prey or a hunter-beast |
+| 🐄 Cow / 🐔 Chicken / 🐟 Fish | Place simple animals (fish go in water) |
 | ⛏️ Dig | Carve rock on the layer you're viewing (Surface opens a cave shaft) |
 | ⚡ Smite | Call down fire — creatures may die (chaos) |
 | ⛰️ Raise / 🌊 Lower | Reshape the land itself |

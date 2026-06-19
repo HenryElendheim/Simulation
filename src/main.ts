@@ -121,6 +121,15 @@ function act(sx: number, sy: number): void {
     case "hunter":
       sim.divineBeast(wx, wy, "hunter");
       break;
+    case "cow":
+      sim.divineBeast(wx, wy, "cow");
+      break;
+    case "chicken":
+      sim.divineBeast(wx, wy, "chicken");
+      break;
+    case "fish":
+      sim.divineBeast(wx, wy, "fish");
+      break;
     case "dig":
       sim.divineDig(wx, wy, renderer.layer);
       break;

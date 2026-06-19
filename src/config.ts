@@ -1,6 +1,14 @@
 /** Tunable constants. Tweak these to change the feel of the world. */
 export const TILE = 16; // pixels per tile at zoom 1
 
+/** Emergent-language pacing. They start knowing nothing and name things slowly. */
+export const Language = {
+  /** Per-encounter chance an unmet concept gets a brand-new word coined. */
+  nameChance: 0.0035,
+  /** Per-encounter chance a creature picks up a word its tribe already has. */
+  learnChance: 0.04,
+} as const;
+
 /** Default island dimensions in tiles. Bump these for a bigger play area. */
 export const DEFAULT_WORLD_W = 160;
 export const DEFAULT_WORLD_H = 160;
@@ -35,7 +43,7 @@ export const Creature = {
   maxAge: 28, // days (with variance)
   breedCooldown: 8, // days
   breedHungerMax: 0.45, // must be reasonably fed to breed
-  crowdCap: 8, // won't breed if this many tribe-mates are within crowdRadius
+  crowdCap: 4, // won't breed if this many tribe-mates are within crowdRadius
   crowdRadius: 130,
 } as const;
 
@@ -75,6 +83,8 @@ export interface SpeciesDef {
   name: string;
   color: string;
   diet: "herbivore" | "carnivore";
+  /** Where it lives/moves: dry land, or in the water (fish). */
+  habitat: "land" | "water";
   speed: number;
   sense: number;
   maxAge: number; // days
@@ -85,29 +95,29 @@ export interface SpeciesDef {
 }
 
 export const SPECIES: Record<string, SpeciesDef> = {
+  // Wild herbivore that flees and is the staple of the food chain.
   grazer: {
-    id: "grazer",
-    name: "grazer",
-    color: "#d8c48a",
-    diet: "herbivore",
-    speed: 32,
-    sense: 95,
-    maxAge: 16,
-    meat: 0.8,
-    breedCooldown: 2.5, // breed fast to stay ahead of predation
-    startCount: 40,
+    id: "grazer", name: "grazer", color: "#d8c48a", diet: "herbivore", habitat: "land",
+    speed: 32, sense: 95, maxAge: 16, meat: 0.8, breedCooldown: 2.5, startCount: 36,
   },
+  // Apex predator.
   hunter: {
-    id: "hunter",
-    name: "hunter-beast",
-    color: "#a8584a",
-    diet: "carnivore",
-    speed: 33, // a touch faster than prey, but healthy adults can escape
-    sense: 115,
-    maxAge: 22,
-    meat: 1.0,
-    breedCooldown: 8, // breed slowly so predators don't overshoot their prey
-    startCount: 6,
+    id: "hunter", name: "hunter-beast", color: "#a8584a", diet: "carnivore", habitat: "land",
+    speed: 33, sense: 115, maxAge: 22, meat: 1.0, breedCooldown: 8, startCount: 8,
+  },
+  // Simple animals: they just wander, graze and drink (and get hunted).
+  cow: {
+    id: "cow", name: "cow", color: "#cdb59a", diet: "herbivore", habitat: "land",
+    speed: 15, sense: 70, maxAge: 22, meat: 1.4, breedCooldown: 6, startCount: 10,
+  },
+  chicken: {
+    id: "chicken", name: "chicken", color: "#e6dcc6", diet: "herbivore", habitat: "land",
+    speed: 22, sense: 55, maxAge: 9, meat: 0.4, breedCooldown: 3, startCount: 14,
+  },
+  // Fish live in the water, swimming and nibbling.
+  fish: {
+    id: "fish", name: "fish", color: "#79aec7", diet: "herbivore", habitat: "water",
+    speed: 26, sense: 60, maxAge: 8, meat: 0.5, breedCooldown: 3, startCount: 30,
   },
 } as const;
 

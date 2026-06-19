@@ -4,6 +4,15 @@ import type { Simulation } from "./sim";
 import { TILE } from "./config";
 import { Layer, TILE_COLORS, UNDER_COLORS, type Tile, type Under } from "./world";
 
+/** Drawn radius per species (world units before zoom). */
+const ANIMAL_SIZE: Record<string, number> = {
+  cow: 6,
+  hunter: 5,
+  grazer: 4,
+  fish: 3,
+  chicken: 2.6,
+};
+
 /** Draws the world, entities and overlays to the canvas each frame. */
 export class Renderer {
   /** Which map level is currently shown. Toggled from the UI. */
@@ -105,21 +114,28 @@ export class Renderer {
     for (const a of sim.animals) {
       const [sx, sy] = cam.worldToScreen(a.x, a.y);
       if (sx < -16 || sy < -16 || sx > cam.viewW + 16 || sy > cam.viewH + 16) continue;
-      const r = (a.species.diet === "carnivore" ? 5 : 4) * z * (a.isAdult ? 1 : 0.7);
+      const r = ANIMAL_SIZE[a.species.id] ?? 4;
+      const rr = r * z * (a.isAdult ? 1 : 0.7);
       ctx.fillStyle = a.species.color;
       ctx.globalAlpha = 0.4 + a.health * 0.6;
-      // Carnivores drawn as diamonds, herbivores as circles.
-      if (a.species.diet === "carnivore") {
+      if (a.species.habitat === "water") {
+        // Fish: a little ellipse pointing the way it swims.
         ctx.beginPath();
-        ctx.moveTo(sx, sy - r);
-        ctx.lineTo(sx + r, sy);
-        ctx.lineTo(sx, sy + r);
-        ctx.lineTo(sx - r, sy);
+        ctx.ellipse(sx, sy, rr * 1.4, rr * 0.7, Math.atan2(a.vy, a.vx), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (a.species.diet === "carnivore") {
+        // Predators: diamonds.
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - rr);
+        ctx.lineTo(sx + rr, sy);
+        ctx.lineTo(sx, sy + rr);
+        ctx.lineTo(sx - rr, sy);
         ctx.closePath();
         ctx.fill();
       } else {
+        // Herbivores: circles.
         ctx.beginPath();
-        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.arc(sx, sy, rr, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.globalAlpha = 1;

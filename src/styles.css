@@ -74,7 +74,7 @@ html, body {
 .readout { color: var(--muted); }
 
 /* Tools */
-#tools { top: 70px; left: 12px; width: 188px; }
+#tools { top: 70px; left: 12px; width: 188px; max-height: calc(100vh - 100px); overflow-y: auto; }
 .panel-title { color: var(--muted); font-size: 10px; margin-bottom: 8px; }
 #tool-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 #tool-buttons button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 4px; line-height: 1.1; }
@@ -97,6 +97,21 @@ html, body {
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
 .word { color: var(--accent); }
 .gloss { color: var(--muted); }
+
+/* Inspector editor */
+.ed-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0; }
+.ed-row > span:first-child { color: var(--muted); }
+.ed-row input[type="text"], .ed-row input[type="number"], .ed-row select {
+  flex: 1; min-width: 0; background: #1b212b; color: var(--text);
+  border: 1px solid var(--panel-border); border-radius: 6px; padding: 4px 6px; font: inherit;
+}
+.ed-slider { margin: 2px 0 8px; }
+.ed-slider input[type="range"] { width: 100%; }
+.mini-toggle { display: flex; gap: 4px; }
+.mini-toggle button { background: #1b212b; color: var(--text); border: 1px solid var(--panel-border); border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; }
+.ed-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.ed-actions button { background: #1b212b; color: var(--text); border: 1px solid var(--panel-border); border-radius: 6px; padding: 6px 8px; cursor: pointer; font: inherit; }
+.ed-actions button.danger { color: var(--danger); border-color: var(--danger); }
 
 /* Dictionary */
 .tribe-block { margin-bottom: 12px; }
