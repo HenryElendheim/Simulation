@@ -2,6 +2,7 @@ import { Camera } from "./camera";
 import { DEFAULT_WORLD_H, DEFAULT_WORLD_W } from "./config";
 import type { Creature } from "./creature";
 import { Renderer } from "./render";
+import type { Animal } from "./animal";
 import { Simulation } from "./sim";
 import { UI, type ToolId } from "./ui";
 import { Layer, World } from "./world";
@@ -59,13 +60,23 @@ let lastY = 0;
 
 const isPaint = (t: ToolId) => t === "raise" || t === "lower";
 
+/** Entity currently being dragged with the Inspect tool. */
+let dragTarget: Creature | Animal | null = null;
+
 canvas.addEventListener("pointerdown", (e) => {
   isDown = true;
   dragged = 0;
   lastX = e.clientX;
   lastY = e.clientY;
   canvas.setPointerCapture(e.pointerId);
-  if (isPaint(ui.activeTool)) paint(e.clientX, e.clientY);
+  if (isPaint(ui.activeTool)) {
+    paint(e.clientX, e.clientY);
+  } else if (ui.activeTool === "inspect") {
+    // Grab whatever is under the cursor so it can be selected and dragged.
+    const [wx, wy] = cam.screenToWorld(e.clientX, e.clientY);
+    dragTarget = pickEntity(wx, wy);
+    if (dragTarget) ui.selected = dragTarget;
+  }
 });
 
 canvas.addEventListener("pointermove", (e) => {
@@ -75,7 +86,12 @@ canvas.addEventListener("pointermove", (e) => {
   dragged += Math.abs(dx) + Math.abs(dy);
   lastX = e.clientX;
   lastY = e.clientY;
-  if (isPaint(ui.activeTool)) {
+  if (dragTarget) {
+    // Move the grabbed entity to the cursor.
+    const [wx, wy] = cam.screenToWorld(e.clientX, e.clientY);
+    dragTarget.x = wx;
+    dragTarget.y = wy;
+  } else if (isPaint(ui.activeTool)) {
     paint(e.clientX, e.clientY);
   } else {
     canvas.classList.add("panning");
@@ -86,6 +102,10 @@ canvas.addEventListener("pointermove", (e) => {
 canvas.addEventListener("pointerup", (e) => {
   isDown = false;
   canvas.classList.remove("panning");
+  if (dragTarget) {
+    dragTarget = null;
+    return;
+  }
   // A click (negligible drag) triggers the tool action.
   if (dragged < 5 && !isPaint(ui.activeTool)) act(e.clientX, e.clientY);
 });
@@ -104,7 +124,7 @@ function act(sx: number, sy: number): void {
   const [wx, wy] = cam.screenToWorld(sx, sy);
   switch (ui.activeTool) {
     case "inspect":
-      ui.selected = pickCreature(wx, wy);
+      ui.selected = pickEntity(wx, wy); // clicking empty space deselects
       break;
     case "food":
       sim.blessFood(wx, wy);
@@ -139,16 +159,19 @@ function act(sx: number, sy: number): void {
   }
 }
 
-/** Pick a creature on the layer currently being viewed. */
-function pickCreature(wx: number, wy: number): Creature | null {
-  let best: Creature | null = null;
+/** Pick a person or animal near (wx,wy) on the layer being viewed. */
+function pickEntity(wx: number, wy: number): Creature | Animal | null {
+  let best: Creature | Animal | null = null;
   let bestD = (14 / cam.zoom) ** 2; // generous pick radius in world units
   for (const c of sim.creatures) {
     if (c.layer !== renderer.layer) continue;
     const d = (c.x - wx) ** 2 + (c.y - wy) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      best = c;
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  if (renderer.layer === Layer.Surface) {
+    for (const a of sim.animals) {
+      const d = (a.x - wx) ** 2 + (a.y - wy) ** 2;
+      if (d < bestD) { bestD = d; best = a; }
     }
   }
   return best;

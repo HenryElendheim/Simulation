@@ -1,8 +1,11 @@
 import { Camera } from "./camera";
+import type { Animal } from "./animal";
 import type { Creature } from "./creature";
 import type { Simulation } from "./sim";
 import { TILE } from "./config";
 import { Layer, TILE_COLORS, UNDER_COLORS, type Tile, type Under } from "./world";
+
+export type Selectable = Creature | Animal;
 
 /** Drawn radius per species (world units before zoom). */
 const ANIMAL_SIZE: Record<string, number> = {
@@ -20,18 +23,39 @@ export class Renderer {
 
   constructor(private ctx: CanvasRenderingContext2D, private cam: Camera) {}
 
-  draw(sim: Simulation, selected: Creature | null): void {
+  draw(sim: Simulation, selected: Selectable | null): void {
     const ctx = this.ctx;
     ctx.fillStyle = "#05070a";
     ctx.fillRect(0, 0, this.cam.viewW, this.cam.viewH);
 
     this.drawTerrain(sim);
     if (this.layer === Layer.Surface) {
+      this.drawHomes(sim);
       this.drawFood(sim);
       this.drawTrees(sim);
-      this.drawAnimals(sim);
+      this.drawAnimals(sim, selected);
     }
     this.drawCreatures(sim, selected);
+  }
+
+  private drawHomes(sim: Simulation): void {
+    const { ctx, cam } = this;
+    const z = Math.max(0.6, cam.zoom);
+    for (const h of sim.homes) {
+      const [sx, sy] = cam.worldToScreen(h.x, h.y);
+      if (sx < -16 || sy < -16 || sx > cam.viewW + 16 || sy > cam.viewH + 16) continue;
+      const s = 5 * z;
+      // Hut: walls + a roof tinted with the tribe colour.
+      ctx.fillStyle = "#6b4a2f";
+      ctx.fillRect(sx - s, sy - s * 0.4, s * 2, s * 1.4);
+      ctx.fillStyle = h.color;
+      ctx.beginPath();
+      ctx.moveTo(sx - s * 1.2, sy - s * 0.4);
+      ctx.lineTo(sx, sy - s * 1.5);
+      ctx.lineTo(sx + s * 1.2, sy - s * 0.4);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   private drawTerrain(sim: Simulation): void {
@@ -108,7 +132,7 @@ export class Renderer {
     }
   }
 
-  private drawAnimals(sim: Simulation): void {
+  private drawAnimals(sim: Simulation, selected: Selectable | null): void {
     const { ctx, cam } = this;
     const z = Math.max(0.6, cam.zoom);
     for (const a of sim.animals) {
@@ -116,6 +140,13 @@ export class Renderer {
       if (sx < -16 || sy < -16 || sx > cam.viewW + 16 || sy > cam.viewH + 16) continue;
       const r = ANIMAL_SIZE[a.species.id] ?? 4;
       const rr = r * z * (a.isAdult ? 1 : 0.7);
+      if (a === selected) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, rr + 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.fillStyle = a.species.color;
       ctx.globalAlpha = 0.4 + a.health * 0.6;
       if (a.species.habitat === "water") {
@@ -142,7 +173,7 @@ export class Renderer {
     }
   }
 
-  private drawCreatures(sim: Simulation, selected: Creature | null): void {
+  private drawCreatures(sim: Simulation, selected: Selectable | null): void {
     const { ctx, cam } = this;
     const baseR = 5 * Math.max(0.6, cam.zoom);
     for (const c of sim.creatures) {

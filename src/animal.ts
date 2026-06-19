@@ -47,8 +47,11 @@ export class Animal {
     // between kills while waiting for catchable (young) prey.
     const hungerRate = this.species.diet === "carnivore" ? 0.006 : 0.012;
     this.hunger = clamp01(this.hunger + hungerRate * dt);
-    // Land animals get thirsty and must drink; fish live in water already.
-    if (this.species.habitat === "land") this.thirst = clamp01(this.thirst + 0.01 * dt);
+    // Land herbivores get thirsty and must drink. Carnivores get moisture from
+    // prey, and fish live in the water — so neither tracks thirst.
+    if (this.species.habitat === "land" && this.species.diet === "herbivore") {
+      this.thirst = clamp01(this.thirst + 0.01 * dt);
+    }
 
     if (this.hunger >= 1 || this.thirst >= 1) this.health = clamp01(this.health - 0.05 * dt);
     else if (this.hunger < 0.5 && this.thirst < 0.5) this.health = clamp01(this.health + 0.01 * dt);

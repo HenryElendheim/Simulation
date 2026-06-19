@@ -9,6 +9,20 @@ export const Language = {
   learnChance: 0.04,
 } as const;
 
+/** Intellect-driven abilities (learning speed, teaching, building). */
+export const Mind = {
+  /** Language chances are multiplied by this range as intellect goes 0 -> 1. */
+  minLangMul: 0.35,
+  maxLangMul: 3.0,
+  /** Minimum intellect to build homes / teach other tribes. */
+  buildIntellect: 0.78,
+  teachOtherTribeIntellect: 0.7,
+  /** Per-idle-decision chance a qualifying builder starts a home. */
+  buildUrge: 0.01,
+  buildEffort: 4, // seconds of work to raise a home
+  buildCooldown: 10, // days before building another
+} as const;
+
 /** Default island dimensions in tiles. Bump these for a bigger play area. */
 export const DEFAULT_WORLD_W = 160;
 export const DEFAULT_WORLD_H = 160;
@@ -103,21 +117,21 @@ export const SPECIES: Record<string, SpeciesDef> = {
   // Apex predator.
   hunter: {
     id: "hunter", name: "hunter-beast", color: "#a8584a", diet: "carnivore", habitat: "land",
-    speed: 33, sense: 115, maxAge: 22, meat: 1.0, breedCooldown: 8, startCount: 8,
+    speed: 33, sense: 115, maxAge: 26, meat: 1.0, breedCooldown: 6, startCount: 8,
   },
   // Simple animals: they just wander, graze and drink (and get hunted).
   cow: {
     id: "cow", name: "cow", color: "#cdb59a", diet: "herbivore", habitat: "land",
-    speed: 15, sense: 70, maxAge: 22, meat: 1.4, breedCooldown: 6, startCount: 10,
+    speed: 15, sense: 70, maxAge: 24, meat: 1.4, breedCooldown: 4, startCount: 18,
   },
   chicken: {
     id: "chicken", name: "chicken", color: "#e6dcc6", diet: "herbivore", habitat: "land",
-    speed: 22, sense: 55, maxAge: 9, meat: 0.4, breedCooldown: 3, startCount: 14,
+    speed: 22, sense: 55, maxAge: 10, meat: 0.4, breedCooldown: 2.5, startCount: 20,
   },
   // Fish live in the water, swimming and nibbling.
   fish: {
     id: "fish", name: "fish", color: "#79aec7", diet: "herbivore", habitat: "water",
-    speed: 26, sense: 60, maxAge: 8, meat: 0.5, breedCooldown: 3, startCount: 30,
+    speed: 26, sense: 60, maxAge: 10, meat: 0.5, breedCooldown: 2.5, startCount: 36,
   },
 } as const;
 

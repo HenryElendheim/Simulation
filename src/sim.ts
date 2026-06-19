@@ -1,5 +1,5 @@
 import { Animal } from "./animal";
-import { Creature as CC, Food, Language, SECONDS_PER_DAY, SPECIES, Trees, TILE, type SpeciesDef } from "./config";
+import { Creature as CC, Food, Language, Mind, SECONDS_PER_DAY, SPECIES, Trees, TILE, type SpeciesDef } from "./config";
 import { Creature } from "./creature";
 import {
   CONCEPTS,
@@ -18,6 +18,12 @@ export interface LogEntry {
   kind: "life" | "lang" | "doom" | "divine";
 }
 
+export interface Home {
+  x: number;
+  y: number;
+  color: string;
+}
+
 /**
  * Owns the whole simulation: world, tribes, creatures, food, the clock, and the
  * event chronicle. Also exposes the perception helpers creatures query and the
@@ -31,6 +37,7 @@ export class Simulation {
   foods: FoodSource[] = [];
   trees: Tree[] = [];
   animals: Animal[] = [];
+  homes: Home[] = [];
   timeDays = 0;
   log: LogEntry[] = [];
 
@@ -51,6 +58,7 @@ export class Simulation {
     this.foods = [];
     this.trees = [];
     this.animals = [];
+    this.homes = [];
 
     for (let i = 0; i < Food.startingBushes; i++) {
       const spot = this.randomBushSpot();
@@ -283,19 +291,30 @@ export class Simulation {
    * of a brand-new word, and record that this individual now knows it.
    */
   experience(c: Creature, concept: ConceptId): void {
+    // Cleverer minds notice, name and learn faster.
+    const mul = Mind.minLangMul + (Mind.maxLangMul - Mind.minLangMul) * c.intellect;
     if (!c.tribe.lexicon.has(concept)) {
       // Brand-new idea: only sometimes does it click into a coined word, so
       // languages build up gradually from nothing as life goes on.
-      if (!this.rng.chance(Language.nameChance)) return;
-      const { word } = nameConcept(c.tribe, concept);
-      this.addLog(`${c.tribe.name} coin "${word}" — meaning "${CONCEPTS[concept].gloss}".`, "lang");
-      c.vocabulary.add(concept);
+      if (!this.rng.chance(Language.nameChance * mul)) return;
+      this.coin(c, concept);
       return;
     }
-    // The tribe has the word; this individual learns it gradually.
-    if (!c.vocabulary.has(concept) && this.rng.chance(Language.learnChance)) {
+    if (!c.vocabulary.has(concept) && this.rng.chance(Language.learnChance * mul)) {
       c.vocabulary.add(concept);
     }
+  }
+
+  /** Like experience but guaranteed — used for teaching and the editor. */
+  experienceForced(c: Creature, concept: ConceptId): void {
+    if (!c.tribe.lexicon.has(concept)) this.coin(c, concept);
+    else c.vocabulary.add(concept);
+  }
+
+  private coin(c: Creature, concept: ConceptId): void {
+    const { word } = nameConcept(c.tribe, concept);
+    this.addLog(`${c.tribe.name} coin "${word}" — meaning "${CONCEPTS[concept].gloss}".`, "lang");
+    c.vocabulary.add(concept);
   }
 
   /** Editor helper: give a creature (and its tribe) words for every concept. */
@@ -324,8 +343,17 @@ export class Simulation {
     }
     const maxAge = CC.maxAge * this.rng.range(0.7, 1.3);
     const c = new Creature(x, y, tribe, maxAge);
+    c.intellect = this.rng.range(0.15, 0.5); // they start fairly simple
     this.creatures.push(c);
     return c;
+  }
+
+  /** A clever creature raises a home; returns its location for the builder. */
+  buildHome(c: Creature): Home {
+    const home: Home = { x: c.x, y: c.y, color: c.tribe.color };
+    this.homes.push(home);
+    if (this.homes.length < 60) this.addLog(`The ${c.tribe.name} build a home.`, "life");
+    return home;
   }
 
   kill(c: Creature): void {

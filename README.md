@@ -35,13 +35,36 @@ Other scripts: `npm run build` (typecheck + production build),
   **chickens** (small peckers), and **fish** that swim and feed in the water.
 - **Tribes**, each with its own colour and its own invented language.
 
-## Editing creatures
+## Selecting, dragging and editing
 
-Pick the **🔍 Inspect** power and click any person to open a live editor. You can
-rename it, switch its **tribe**, move it between **surface and cave**, drag
-sliders for **health / fullness / hydration / energy**, set its **age** and
-**max age**, **teach it every word** or wipe its vocabulary, or **smite** just
-that one. Everything updates the simulation immediately.
+Pick the **🔍 Inspect** power and click **any creature — person or animal** to
+select it. **Drag** it anywhere with the mouse to reposition it.
+
+Selecting a **person** opens a full live editor: rename it, switch its **tribe**,
+move it **surface ↔ cave**, drag sliders for **health / fullness / hydration /
+energy / intellect**, set its **age** and **max age**, **teach it every word**
+or wipe its vocabulary, or **smite** it. Animals get a simpler editor (health,
+fullness, hydration, age, max age, smite).
+
+### Intellect
+
+Every person has an **intellect** (0–100%), editable on the slider. Cleverer
+folk **learn and coin words faster** and **teach more readily**. Past a high
+threshold they gain two abilities:
+
+- **Building homes** — clever, settled adults raise huts (shown on the map).
+- **Teaching other tribes** — when calm and willing, a clever person shares a
+  concept with a stranger from another tribe, who then coins it in *their own*
+  language. Knowledge crosses tribes while languages stay distinct.
+
+Children inherit roughly the average of their parents' intellect.
+
+### Emotions
+
+Each person feels an **emotion** — happy, content, afraid, hungry, lonely,
+miserable, or curious — derived from their needs, safety, company and home. It
+shows in the inspector (with an emoji) and nudges behaviour: a frightened
+creature won't mate, for instance.
 
 ## Language: starting from nothing
 

@@ -1,4 +1,4 @@
-import { Creature as C, Dig, Needs, SECONDS_PER_DAY, TILE } from "./config";
+import { Creature as C, Dig, Mind, Needs, SECONDS_PER_DAY, TILE } from "./config";
 import { CONCEPTS } from "./language";
 import type { ConceptId, Tribe } from "./language";
 import type { Simulation } from "./sim";
@@ -16,7 +16,17 @@ export type Action =
   | "flee"
   | "hunt"
   | "dig"
+  | "build"
   | "socialize";
+
+export type Emotion =
+  | "happy"
+  | "content"
+  | "afraid"
+  | "hungry"
+  | "lonely"
+  | "miserable"
+  | "curious";
 
 let NEXT_ID = 1;
 
@@ -39,6 +49,18 @@ export class Creature {
   age = 0; // days
   maxAge: number;
   lastBreed = -999;
+
+  /** 0..1 cleverness. Drives how fast they learn/teach and whether they build. */
+  intellect = 0.3;
+  /** Current felt emotion (display + light behaviour influence). */
+  emotion: Emotion = "content";
+  /** 0..1 overall wellbeing, smoothed; feeds the emotion + breeding. */
+  mood = 0.6;
+  /** A built home, if any. */
+  home: { x: number; y: number } | null = null;
+  private lastBuild = -999;
+  private buildEffort = 0;
+  private sawFriendAt = 0;
 
   action: Action = "wander";
   /**
@@ -99,6 +121,7 @@ export class Creature {
     this.decide(sim);
     this.act(sim, dt);
     this.tryBreed(sim);
+    this.feel(sim);
     this.maybeSpeak(sim);
 
     if (this.speechUntil < sim.timeDays) {
@@ -151,20 +174,39 @@ export class Creature {
       if (other.layer !== this.layer) continue;
       if (other.tribe.id === this.tribe.id) {
         sim.experience(this, "friend");
-        // Teach each other: spread one unknown word per encounter.
+        this.sawFriendAt = sim.timeDays;
         this.teach(other, sim);
       } else {
         sim.experience(this, "stranger");
+        // Clever, willing folk share knowledge across tribes too.
+        this.teachOtherTribe(other, sim);
       }
     }
   }
 
-  /** Share a known word the other tribe-mate lacks (language transmission). */
+  /** Teach a tribe-mate a word they lack. Cleverer teachers do so more readily. */
   private teach(other: Creature, sim: Simulation): void {
-    if (!sim.rng.chance(0.5)) return;
+    if (!sim.rng.chance(0.3 + this.intellect * 0.6)) return;
     for (const concept of this.vocabulary) {
       if (!other.vocabulary.has(concept)) {
         other.vocabulary.add(concept);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Cross-tribe teaching: only the clever do it, and only when both are calm
+   * ("willing"). The student's tribe learns the *concept* and coins it in their
+   * own language, so knowledge spreads while languages stay distinct.
+   */
+  private teachOtherTribe(other: Creature, sim: Simulation): void {
+    if (this.intellect < Mind.teachOtherTribeIntellect) return;
+    if (this.emotion === "afraid" || other.emotion === "afraid") return; // unwilling
+    if (!sim.rng.chance(this.intellect * 0.15)) return;
+    for (const concept of this.vocabulary) {
+      if (!other.tribe.lexicon.has(concept) || !other.vocabulary.has(concept)) {
+        sim.experienceForced(other, concept); // their tribe names it themselves
         return;
       }
     }
@@ -249,11 +291,25 @@ export class Creature {
     }
     if (this.action === "sleep" && this.energy >= 0.95) this.action = "wander";
 
-    // Content and idle (well-fed, rested): sometimes explore caves or dig.
+    // Content and idle (well-fed, rested): clever ones build, others explore/dig.
     const content = this.hunger < 0.4 && this.thirst < 0.4 && this.energy > 0.5;
-    if (content && this.action !== "dig") {
+    if (content && this.action !== "dig" && this.action !== "build") {
       const tx = Math.floor(this.x / TILE);
       const ty = Math.floor(this.y / TILE);
+      // Smart, settled folk build a home (once, then occasionally another).
+      if (
+        this.layer === Layer.Surface &&
+        this.isAdult &&
+        this.intellect >= Mind.buildIntellect &&
+        !this.home &&
+        sim.timeDays - this.lastBuild > Mind.buildCooldown &&
+        sim.world.walkable(Layer.Surface, this.x, this.y) &&
+        sim.rng.chance(Mind.buildUrge)
+      ) {
+        this.buildEffort = 0;
+        this.action = "build";
+        return;
+      }
       if (this.layer === Layer.Surface && sim.world.isEntrance(tx, ty) && sim.rng.chance(Dig.exploreUrge)) {
         this.layer = Layer.Underground; // climb down a known hole to explore
       } else if (sim.rng.chance(Dig.idleUrge)) {
@@ -262,7 +318,7 @@ export class Creature {
       }
     }
 
-    if (this.action !== "wander" && this.action !== "dig") this.pickWander(sim);
+    if (this.action !== "wander" && this.action !== "dig" && this.action !== "build") this.pickWander(sim);
     if (this.action === "wander" && sim.timeDays > this.wanderUntil) this.pickWander(sim);
   }
 
@@ -367,6 +423,17 @@ export class Creature {
         }
         return;
       }
+      case "build": {
+        this.vx = this.vy = 0;
+        this.buildEffort += dt;
+        if (this.buildEffort >= Mind.buildEffort) {
+          this.home = sim.buildHome(this);
+          this.lastBuild = sim.timeDays;
+          this.buildEffort = 0;
+          this.action = "wander";
+        }
+        return;
+      }
       default:
         this.moveToward(sim, this.targetX, this.targetY, dt);
     }
@@ -413,6 +480,8 @@ export class Creature {
       const child = sim.spawnCreature(this.tribe, this.x + sim.rng.range(-8, 8), this.y + sim.rng.range(-8, 8));
       if (child) {
         child.age = 0;
+        // Children inherit roughly their parents' cleverness.
+        child.intellect = clamp01((this.intellect + other.intellect) / 2 + sim.rng.range(-0.08, 0.08));
         sim.experience(this, "birth");
         sim.addLog(`A ${this.tribe.name} child is born.`, "life");
       }
@@ -426,8 +495,30 @@ export class Creature {
       this.hunger < C.breedHungerMax &&
       this.thirst < 0.5 &&
       this.energy > 0.4 &&
+      this.emotion !== "afraid" && // won't mate while frightened
       sim.timeDays - this.lastBreed > C.breedCooldown
     );
+  }
+
+  /** Derive a felt emotion + smoothed mood from the current situation. */
+  private feel(sim: Simulation): void {
+    // Instantaneous wellbeing from needs and safety.
+    let w = (this.health + (1 - this.hunger) + (1 - this.thirst) + this.energy) / 4;
+    if (this.action === "flee") w -= 0.4;
+    if (this.home) w += 0.05;
+    const lonely = sim.timeDays - this.sawFriendAt > 1.5;
+    if (lonely) w -= 0.1;
+    this.mood = clamp01(this.mood + (w - this.mood) * 0.05); // smooth
+
+    let e: Emotion;
+    if (this.action === "flee") e = "afraid";
+    else if (this.health < 0.3 || this.hunger > 0.85 || this.thirst > 0.85) e = "miserable";
+    else if (this.hunger > 0.6 || this.thirst > 0.6) e = "hungry";
+    else if (this.action === "dig" || this.layer === Layer.Underground) e = "curious";
+    else if (lonely) e = "lonely";
+    else if (this.mood > 0.7) e = "happy";
+    else e = "content";
+    this.emotion = e;
   }
 
   /** Occasionally voice a short utterance from known words about the current focus. */

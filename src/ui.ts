@@ -1,7 +1,14 @@
+import type { Animal } from "./animal";
 import type { Creature } from "./creature";
 import { CONCEPTS, type ConceptId } from "./language";
 import type { Simulation } from "./sim";
 import { Layer } from "./world";
+
+type Selected = Creature | Animal;
+/** Animals have a `species`; people have a `tribe`. */
+function isCreature(s: Selected): s is Creature {
+  return "tribe" in s;
+}
 
 export type ToolId =
   | "inspect" | "food" | "spawn" | "tribe"
@@ -34,7 +41,7 @@ export const TOOLS: ToolDef[] = [
 /** Builds and refreshes all DOM panels. Pure view layer over the Simulation. */
 export class UI {
   activeTool: ToolId = "inspect";
-  selected: Creature | null = null;
+  selected: Selected | null = null;
   private activeTab = "inspect";
   private onTool: (t: ToolId) => void;
   private onSpeed: (s: number) => void;
@@ -114,7 +121,7 @@ export class UI {
     }
   }
 
-  private selectedId = -1;
+  private builtFor: Selected | null = null;
   private inspectorSync: (() => void) | null = null;
 
   /** Called every frame with the live sim to refresh panel contents. */
@@ -131,26 +138,84 @@ export class UI {
 
   /** Rebuild the editor only when the selection changes; otherwise just sync values. */
   private updateInspector(sim: Simulation): void {
-    const c = this.selected;
-    const id = c && c.alive ? c.id : -1;
-    if (id !== this.selectedId) {
-      this.selectedId = id;
+    const sel = this.selected && this.selected.alive ? this.selected : null;
+    if (sel !== this.builtFor) {
+      this.builtFor = sel;
       this.buildInspector(sim);
     } else {
       this.inspectorSync?.();
     }
   }
 
-  /** Construct the editable inspector form for the selected creature. */
+  /** Build the right editor for whatever is selected (person or animal). */
   private buildInspector(sim: Simulation): void {
     const host = document.getElementById("tab-inspect")!;
-    const c = this.selected;
-    if (!c || !c.alive) {
-      host.innerHTML = `<div class="empty">Pick the Inspect power and click a creature to edit every detail of it.</div>`;
+    const sel = this.selected;
+    if (!sel || !sel.alive) {
+      host.innerHTML = `<div class="empty">Pick the Inspect power and click any creature to select, drag and edit it.</div>`;
       this.inspectorSync = null;
       return;
     }
+    if (isCreature(sel)) this.buildPersonInspector(sim, sel);
+    else this.buildAnimalInspector(sel);
+  }
 
+  /** Editor for an animal (cow, chicken, fish, grazer, predator). */
+  private buildAnimalInspector(a: Animal): void {
+    const host = document.getElementById("tab-inspect")!;
+    const slider = (key: string, label: string, color: string) =>
+      `<div class="ed-slider"><div class="kv"><span>${label}</span><span data-pct="${key}"></span></div>
+       <input id="ed-${key}" type="range" min="0" max="100" style="accent-color:${color}"></div>`;
+    host.innerHTML = `
+      <div class="kv"><span>Species</span><span><span class="swatch" style="background:${a.species.color}"></span>${a.species.name}</span></div>
+      <div class="kv"><span>Diet</span><span>${a.species.diet} · ${a.species.habitat}</span></div>
+      <div class="kv"><span>Doing</span><span data-ro="doing"></span></div>
+      <hr style="border-color:#1a2029">
+      ${slider("health", "Health", "#6fe09c")}
+      ${slider("full", "Fullness", "#e0a86f")}
+      ${a.species.habitat === "land" ? slider("hydra", "Hydration", "#6fa8e0") : ""}
+      <label class="ed-row"><span>Age (days)</span><input id="ed-age" type="number" min="0" step="0.5"></label>
+      <label class="ed-row"><span>Max age</span><input id="ed-maxage" type="number" min="1" step="1"></label>
+      <div class="ed-actions"><button id="ed-kill" class="danger">Smite this one</button></div>
+      <div class="hint">Drag it around the world with the Inspect tool.</div>
+    `;
+    const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const sliders = [
+      { key: "health", get: () => a.health, set: (v: number) => (a.health = v) },
+      { key: "full", get: () => 1 - a.hunger, set: (v: number) => (a.hunger = 1 - v) },
+      ...(a.species.habitat === "land"
+        ? [{ key: "hydra", get: () => 1 - a.thirst, set: (v: number) => (a.thirst = 1 - v) }]
+        : []),
+    ];
+    for (const s of sliders) {
+      const el = byId<HTMLInputElement>(`ed-${s.key}`);
+      el.oninput = () => s.set(clamp01(Number(el.value) / 100));
+    }
+    const age = byId<HTMLInputElement>("ed-age");
+    age.oninput = () => { const v = Number(age.value); if (!Number.isNaN(v)) a.age = Math.max(0, v); };
+    const maxage = byId<HTMLInputElement>("ed-maxage");
+    maxage.oninput = () => { const v = Number(maxage.value); if (!Number.isNaN(v) && v > 0) a.maxAge = v; };
+    byId("ed-kill").onclick = () => { a.alive = false; };
+
+    this.inspectorSync = () => {
+      const active = document.activeElement;
+      const set = (q: string, text: string) => { const e = document.querySelector(q); if (e) e.textContent = text; };
+      set('[data-ro="doing"]', a.state);
+      for (const s of sliders) {
+        const el = byId<HTMLInputElement>(`ed-${s.key}`);
+        const v = Math.round(s.get() * 100);
+        if (el !== active) el.value = String(v);
+        set(`[data-pct="${s.key}"]`, `${v}%`);
+      }
+      if (age !== active) age.value = a.age.toFixed(1);
+      if (maxage !== active) maxage.value = String(Math.round(a.maxAge));
+    };
+    this.inspectorSync();
+  }
+
+  /** Editor for a person (full detail incl. intellect, emotion, words). */
+  private buildPersonInspector(sim: Simulation, c: Creature): void {
+    const host = document.getElementById("tab-inspect")!;
     const tribeOpts = sim.tribes
       .map((t, i) => `<option value="${i}" ${t === c.tribe ? "selected" : ""}>${t.name}</option>`)
       .join("");
@@ -162,13 +227,16 @@ export class UI {
       <label class="ed-row"><span>Name</span><input id="ed-name" type="text" placeholder="(unnamed)" value="${escapeAttr(c.name)}"></label>
       <label class="ed-row"><span>Tribe</span><select id="ed-tribe">${tribeOpts}</select></label>
       <div class="ed-row"><span>Where</span><span class="mini-toggle"><button id="ed-surface">Surface</button><button id="ed-under">Cave</button></span></div>
+      <div class="kv"><span>Feeling</span><span data-ro="emotion"></span></div>
       <div class="kv"><span>Doing</span><span data-ro="doing"></span></div>
+      <div class="kv"><span>Home</span><span data-ro="home"></span></div>
       <div class="kv"><span>Says</span><span class="word" data-ro="says"></span></div>
       <hr style="border-color:#1a2029">
       ${slider("health", "Health", "#6fe09c")}
       ${slider("full", "Fullness", "#e0a86f")}
       ${slider("hydra", "Hydration", "#6fa8e0")}
       ${slider("energy", "Energy", "#c9a8e0")}
+      ${slider("intellect", "Intellect", "#e0d06f")}
       <label class="ed-row"><span>Age (days)</span><input id="ed-age" type="number" min="0" step="0.5"></label>
       <label class="ed-row"><span>Max age</span><input id="ed-maxage" type="number" min="1" step="1"></label>
       <div class="ed-actions">
@@ -193,6 +261,7 @@ export class UI {
       { key: "full", get: () => 1 - c.hunger, set: (v: number) => (c.hunger = 1 - v) },
       { key: "hydra", get: () => 1 - c.thirst, set: (v: number) => (c.thirst = 1 - v) },
       { key: "energy", get: () => c.energy, set: (v: number) => (c.energy = v) },
+      { key: "intellect", get: () => c.intellect, set: (v: number) => (c.intellect = v) },
     ];
     for (const s of sliders) {
       const el = byId<HTMLInputElement>(`ed-${s.key}`);
@@ -210,7 +279,9 @@ export class UI {
     this.inspectorSync = () => {
       const active = document.activeElement;
       const set = (sel: string, text: string) => { const e = document.querySelector(sel); if (e) e.textContent = text; };
+      set('[data-ro="emotion"]', `${EMOJI[c.emotion] ?? ""} ${c.emotion}`);
       set('[data-ro="doing"]', c.action);
+      set('[data-ro="home"]', c.home ? "has a home" : (c.intellect >= 0.78 ? "none (can build)" : "none"));
       set('[data-ro="says"]', c.speech ? `"${c.speech}" — ${c.speechGloss}` : "—");
       set('[data-ro="vocount"]', String(c.vocabulary.size));
       for (const s of sliders) {
@@ -270,6 +341,11 @@ export class UI {
       .join("");
   }
 }
+
+const EMOJI: Record<string, string> = {
+  happy: "😊", content: "🙂", afraid: "😱", hungry: "😟",
+  lonely: "😔", miserable: "😣", curious: "🤔",
+};
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;

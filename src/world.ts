@@ -124,7 +124,10 @@ export class World {
   }
 
   isWaterAtPixel(px: number, py: number): boolean {
-    return isWater(this.tileAtPixel(px, py));
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    // Out-of-bounds is the void, not water — keeps fish from swimming off-map.
+    return this.inBounds(tx, ty) && isWater(this.tileAt(tx, ty));
   }
 
   /** Find a random water tile (pixel centre), for spawning fish. */
