@@ -19,7 +19,8 @@ export type ConceptId =
   | "person" | "friend" | "stranger"
   | "hunger" | "thirst" | "tired"
   | "eat" | "drink" | "sleep" | "go" | "good" | "bad"
-  | "fire" | "death" | "birth" | "rain" | "god";
+  | "fire" | "death" | "birth" | "rain" | "god"
+  | "cave" | "dark" | "dig" | "danger" | "beast" | "hunt" | "meat";
 
 export interface ConceptDef {
   id: ConceptId;
@@ -52,6 +53,13 @@ export const CONCEPTS: Record<ConceptId, ConceptDef> = {
   birth: { id: "birth", gloss: "birth", category: "event" },
   rain: { id: "rain", gloss: "rain", category: "event" },
   god: { id: "god", gloss: "the sky-being (you)", category: "event" },
+  cave: { id: "cave", gloss: "cave", category: "thing" },
+  dark: { id: "dark", gloss: "darkness", category: "state" },
+  dig: { id: "dig", gloss: "to dig", category: "action" },
+  danger: { id: "danger", gloss: "danger", category: "state" },
+  beast: { id: "beast", gloss: "beast", category: "being" },
+  hunt: { id: "hunt", gloss: "to hunt", category: "action" },
+  meat: { id: "meat", gloss: "meat", category: "thing" },
 };
 
 export const ALL_CONCEPTS = Object.keys(CONCEPTS) as ConceptId[];

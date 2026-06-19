@@ -1,5 +1,11 @@
 import { fbm, RNG } from "./rng";
-import { TILE } from "./config";
+import { Cave, TILE } from "./config";
+
+/** The two stacked top-down maps the world is made of. */
+export enum Layer {
+  Surface = 0,
+  Underground = 1,
+}
 
 export enum Tile {
   DeepWater = 0,
@@ -21,12 +27,39 @@ export const TILE_COLORS: Record<Tile, string> = {
   [Tile.Snow]: "#e8edf2",
 };
 
+/** Underground tile types (the cave layer). */
+export enum Under {
+  Stone = 0, // solid, diggable
+  Cave = 1, // open, walkable
+  CaveWater = 2, // underground pool, drinkable
+  Bedrock = 3, // solid, too hard to dig
+  Ore = 4, // solid, diggable, valuable flavour
+}
+
+export const UNDER_COLORS: Record<Under, string> = {
+  [Under.Stone]: "#3a3640",
+  [Under.Cave]: "#15121a",
+  [Under.CaveWater]: "#1f4a63",
+  [Under.Bedrock]: "#26242c",
+  [Under.Ore]: "#6a5a3a",
+};
+
 /** Tiles a land creature can walk on. */
 export function isLand(t: Tile): boolean {
   return t >= Tile.Sand;
 }
 export function isWater(t: Tile): boolean {
   return t <= Tile.Water;
+}
+/** Vegetated ground that herbivores can graze on. */
+export function isGrazable(t: Tile): boolean {
+  return t === Tile.Grass || t === Tile.Forest;
+}
+export function isCaveOpen(u: Under): boolean {
+  return u === Under.Cave;
+}
+export function isSolidUnder(u: Under): boolean {
+  return u === Under.Stone || u === Under.Bedrock || u === Under.Ore;
 }
 
 /**
@@ -38,6 +71,10 @@ export class World {
   width: number;
   height: number;
   tiles: Uint8Array;
+  /** The underground cave layer, parallel grid to `tiles`. */
+  under: Uint8Array;
+  /** Tile indices where a creature can pass between surface and underground. */
+  entrances = new Set<number>();
   seed: number;
   /** Continuous elevation [0,1], kept so god tools can raise/lower terrain. */
   elevation: Float32Array;
@@ -47,6 +84,7 @@ export class World {
     this.height = height;
     this.seed = seed;
     this.tiles = new Uint8Array(width * height);
+    this.under = new Uint8Array(width * height);
     this.elevation = new Float32Array(width * height);
     this.regenerate(width, height, seed);
   }
@@ -71,9 +109,30 @@ export class World {
     return this.tiles[this.idx(tx, ty)] as Tile;
   }
 
+  underAt(tx: number, ty: number): Under {
+    if (!this.inBounds(tx, ty)) return Under.Bedrock;
+    return this.under[this.idx(tx, ty)] as Under;
+  }
+
   /** World pixel -> tile coordinate. */
   tileAtPixel(px: number, py: number): Tile {
     return this.tileAt(Math.floor(px / TILE), Math.floor(py / TILE));
+  }
+
+  isGrazableAtPixel(px: number, py: number): boolean {
+    return isGrazable(this.tileAtPixel(px, py));
+  }
+
+  /** Whether a creature on `layer` can stand on the tile at the given pixel. */
+  walkable(layer: Layer, px: number, py: number): boolean {
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    if (layer === Layer.Surface) return isLand(this.tileAt(tx, ty));
+    return isCaveOpen(this.underAt(tx, ty));
+  }
+
+  isEntrance(tx: number, ty: number): boolean {
+    return this.entrances.has(this.idx(tx, ty));
   }
 
   regenerate(width: number, height: number, seed: number): void {
@@ -81,7 +140,9 @@ export class World {
     this.height = height;
     this.seed = seed;
     this.tiles = new Uint8Array(width * height);
+    this.under = new Uint8Array(width * height);
     this.elevation = new Float32Array(width * height);
+    this.entrances.clear();
     const rng = new RNG(seed);
     const noiseSeed = rng.int(1, 1 << 30);
     const moistSeed = rng.int(1, 1 << 30);
@@ -106,6 +167,84 @@ export class World {
         this.tiles[i] = this.classify(e, moist);
       }
     }
+
+    this.genUnderground(rng);
+  }
+
+  /** Carve the cave layer with noise, add water pools, ore, and entrances. */
+  private genUnderground(rng: RNG): void {
+    const caveSeed = rng.int(1, 1 << 30);
+    const poolSeed = rng.int(1, 1 << 30);
+    const w = this.width;
+    const h = this.height;
+    // Centre the open band around the target openness fraction.
+    const half = Cave.openness / 2;
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = this.idx(x, y);
+        // Hard bedrock shell around the very edge.
+        if (x < 2 || y < 2 || x >= w - 2 || y >= h - 2) {
+          this.under[i] = Under.Bedrock;
+          continue;
+        }
+        const c = fbm(x, y, 16, 4, caveSeed);
+        if (c > 0.5 - half && c < 0.5 + half) {
+          // Open cavern; deepest spots flood into underground pools.
+          const pool = fbm(x, y, 12, 3, poolSeed);
+          this.under[i] = pool < 0.28 ? Under.CaveWater : Under.Cave;
+        } else {
+          this.under[i] = rng.chance(0.04) ? Under.Ore : Under.Stone;
+        }
+      }
+    }
+
+    // Natural sinkholes: pick land tiles and ensure an open cave beneath.
+    let made = 0;
+    for (let t = 0; t < 600 && made < Cave.naturalEntrances; t++) {
+      const tx = rng.int(3, w - 4);
+      const ty = rng.int(3, h - 4);
+      if (!isLand(this.tileAt(tx, ty))) continue;
+      this.carveRoom(tx, ty, rng.int(1, 2));
+      this.entrances.add(this.idx(tx, ty));
+      made++;
+    }
+  }
+
+  /** Open up a small cave room around a tile (used for entrances). */
+  private carveRoom(tx: number, ty: number, r: number): void {
+    for (let y = ty - r; y <= ty + r; y++) {
+      for (let x = tx - r; x <= tx + r; x++) {
+        if (!this.inBounds(x, y)) continue;
+        if (Math.hypot(x - tx, y - ty) > r + 0.3) continue;
+        const i = this.idx(x, y);
+        if (this.under[i] !== Under.Bedrock) this.under[i] = Under.Cave;
+      }
+    }
+  }
+
+  /**
+   * Dig out a tile. On the surface this sinks a shaft, opening the cave below and
+   * registering an entrance. Underground it tunnels through stone/ore into cave.
+   * Returns true if rock was actually removed. Bedrock can't be dug.
+   */
+  dig(layer: Layer, tx: number, ty: number): boolean {
+    if (!this.inBounds(tx, ty)) return false;
+    const i = this.idx(tx, ty);
+    if (layer === Layer.Surface) {
+      if (!isLand(this.tiles[i] as Tile)) return false;
+      if (isSolidUnder(this.under[i] as Under) && this.under[i] !== Under.Bedrock) {
+        this.under[i] = Under.Cave;
+      }
+      this.entrances.add(i);
+      return true;
+    }
+    const u = this.under[i] as Under;
+    if (u === Under.Stone || u === Under.Ore) {
+      this.under[i] = Under.Cave;
+      return true;
+    }
+    return false;
   }
 
   /** Map an elevation + moisture pair to a tile type. */

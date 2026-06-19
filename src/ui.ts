@@ -1,8 +1,12 @@
 import type { Creature } from "./creature";
 import { CONCEPTS, type ConceptId } from "./language";
 import type { Simulation } from "./sim";
+import { Layer } from "./world";
 
-export type ToolId = "inspect" | "food" | "spawn" | "tribe" | "smite" | "raise" | "lower";
+export type ToolId =
+  | "inspect" | "food" | "spawn" | "tribe"
+  | "grazer" | "hunter" | "dig"
+  | "smite" | "raise" | "lower";
 
 interface ToolDef {
   id: ToolId;
@@ -16,6 +20,9 @@ export const TOOLS: ToolDef[] = [
   { id: "food", icon: "🍒", label: "Bless Food", hint: "Click land to make food bushes grow there." },
   { id: "spawn", icon: "✨", label: "Create", hint: "Click to shape a new creature into the world." },
   { id: "tribe", icon: "👥", label: "New People", hint: "Click to found a new tribe with its own language." },
+  { id: "grazer", icon: "🦌", label: "Herbivore", hint: "Click to place a grazer — prey at the bottom of the food chain." },
+  { id: "hunter", icon: "🐺", label: "Carnivore", hint: "Click to place a hunter-beast that preys on grazers and people." },
+  { id: "dig", icon: "⛏️", label: "Dig", hint: "Click to carve rock on the layer you're viewing (Surface opens a cave shaft)." },
   { id: "smite", icon: "⚡", label: "Smite", hint: "Click to call down fire. Chaos. Creatures may die." },
   { id: "raise", icon: "⛰️", label: "Raise Land", hint: "Click to push the earth upward." },
   { id: "lower", icon: "🌊", label: "Lower Land", hint: "Click to sink the earth toward the sea." },
@@ -28,14 +35,27 @@ export class UI {
   private activeTab = "inspect";
   private onTool: (t: ToolId) => void;
   private onSpeed: (s: number) => void;
+  private onLayer: (layer: number) => void;
 
-  constructor(onTool: (t: ToolId) => void, onSpeed: (s: number) => void) {
+  constructor(onTool: (t: ToolId) => void, onSpeed: (s: number) => void, onLayer: (layer: number) => void) {
     this.onTool = onTool;
     this.onSpeed = onSpeed;
+    this.onLayer = onLayer;
     this.buildToolButtons();
     this.wireSpeed();
+    this.wireLayer();
     this.wireTabs();
     this.setHint();
+  }
+
+  private wireLayer(): void {
+    for (const b of document.querySelectorAll<HTMLButtonElement>(".layer-toggle button")) {
+      b.onclick = () => {
+        for (const o of document.querySelectorAll(".layer-toggle button")) o.classList.remove("active");
+        b.classList.add("active");
+        this.onLayer(Number(b.dataset.layer));
+      };
+    }
   }
 
   private buildToolButtons(): void {
@@ -95,7 +115,8 @@ export class UI {
   render(sim: Simulation): void {
     document.getElementById("clock")!.textContent = `Day ${sim.day}`;
     const pop = sim.creatures.length;
-    document.getElementById("census")!.textContent = `${pop} alive · ${sim.tribes.length} peoples`;
+    document.getElementById("census")!.textContent =
+      `${pop} people · ${sim.tribes.length} tribes · ${sim.animals.length} beasts`;
 
     if (this.activeTab === "inspect") this.renderInspector();
     else if (this.activeTab === "dict") this.renderDictionary(sim);
@@ -120,6 +141,7 @@ export class UI {
     host.innerHTML = `
       <div class="kv"><span>Tribe</span><span><span class="swatch" style="background:${c.tribe.color}"></span>${c.tribe.name}</span></div>
       <div class="kv"><span>Age</span><span>${c.age.toFixed(1)} d ${c.isAdult ? "(adult)" : "(young)"}</span></div>
+      <div class="kv"><span>Where</span><span>${c.layer === Layer.Underground ? "underground" : "surface"}</span></div>
       <div class="kv"><span>Doing</span><span>${c.action}</span></div>
       ${c.speech ? `<div class="kv"><span>Says</span><span class="word">"${c.speech}"</span></div><div class="kv"><span></span><span class="gloss">${c.speechGloss}</span></div>` : ""}
       <hr style="border-color:#1a2029">

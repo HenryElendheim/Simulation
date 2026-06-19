@@ -4,7 +4,7 @@ import type { Creature } from "./creature";
 import { Renderer } from "./render";
 import { Simulation } from "./sim";
 import { UI, type ToolId } from "./ui";
-import { World } from "./world";
+import { Layer, World } from "./world";
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -25,6 +25,9 @@ const ui = new UI(
   (tool: ToolId) => applyToolCursor(tool),
   (s: number) => {
     speed = s;
+  },
+  (layer: number) => {
+    renderer.layer = layer as Layer;
   },
 );
 
@@ -112,16 +115,27 @@ function act(sx: number, sy: number): void {
     case "tribe":
       sim.foundTribe(wx, wy);
       break;
+    case "grazer":
+      sim.divineBeast(wx, wy, "grazer");
+      break;
+    case "hunter":
+      sim.divineBeast(wx, wy, "hunter");
+      break;
+    case "dig":
+      sim.divineDig(wx, wy, renderer.layer);
+      break;
     case "smite":
       sim.smite(wx, wy);
       break;
   }
 }
 
+/** Pick a creature on the layer currently being viewed. */
 function pickCreature(wx: number, wy: number): Creature | null {
   let best: Creature | null = null;
   let bestD = (14 / cam.zoom) ** 2; // generous pick radius in world units
   for (const c of sim.creatures) {
+    if (c.layer !== renderer.layer) continue;
     const d = (c.x - wx) ** 2 + (c.y - wy) ** 2;
     if (d < bestD) {
       bestD = d;

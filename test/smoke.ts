@@ -1,11 +1,14 @@
 // Headless sanity check of the core sim (no DOM). Run: npx tsx test/smoke.ts
 import { Simulation } from "../src/sim";
-import { World } from "../src/world";
+import { Layer, Under, World } from "../src/world";
 
 const seed = 12345;
 const world = new World(90, 90, seed);
 const sim = new Simulation(world, seed);
 sim.seedLife(3, 6);
+
+const caveTiles0 = world.under.reduce((n, u) => n + (u === Under.Cave ? 1 : 0), 0);
+const entrances0 = world.entrances.size;
 
 const startPop = sim.creatures.length;
 let births = 0;
@@ -26,11 +29,20 @@ for (let i = 0; i < 30000; i++) {
   }
 }
 
+const herb = sim.animals.filter((a) => a.species.diet === "herbivore").length;
+const carn = sim.animals.filter((a) => a.species.diet === "carnivore").length;
+const underground = sim.creatures.filter((c) => c.layer === Layer.Underground).length;
+const caveTiles1 = world.under.reduce((n, u) => n + (u === Under.Cave ? 1 : 0), 0);
+
 console.log(`Days elapsed:     ${sim.day}`);
 console.log(`Population:       ${startPop} -> ${sim.creatures.length}`);
 console.log(`Births logged:    ${births}`);
 console.log(`Deaths logged:    ${deaths}`);
 console.log(`Words coined:     ${coins}`);
+console.log(`Animals:          ${herb} herbivores, ${carn} carnivores`);
+console.log(`People below:     ${underground}`);
+console.log(`Cave tiles:       ${caveTiles0} -> ${caveTiles1} (dug ${caveTiles1 - caveTiles0})`);
+console.log(`Entrances:        ${entrances0} -> ${world.entrances.size}`);
 console.log("");
 for (const t of sim.tribes) {
   const sample = [...t.lexicon.entries()].slice(0, 6).map(([id, w]) => `${w}=${id}`);

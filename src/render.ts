@@ -2,10 +2,13 @@ import { Camera } from "./camera";
 import type { Creature } from "./creature";
 import type { Simulation } from "./sim";
 import { TILE } from "./config";
-import { TILE_COLORS, type Tile } from "./world";
+import { Layer, TILE_COLORS, UNDER_COLORS, type Tile, type Under } from "./world";
 
 /** Draws the world, entities and overlays to the canvas each frame. */
 export class Renderer {
+  /** Which map level is currently shown. Toggled from the UI. */
+  layer: Layer = Layer.Surface;
+
   constructor(private ctx: CanvasRenderingContext2D, private cam: Camera) {}
 
   draw(sim: Simulation, selected: Creature | null): void {
@@ -14,13 +17,18 @@ export class Renderer {
     ctx.fillRect(0, 0, this.cam.viewW, this.cam.viewH);
 
     this.drawTerrain(sim);
-    this.drawFood(sim);
+    if (this.layer === Layer.Surface) {
+      this.drawFood(sim);
+      this.drawTrees(sim);
+      this.drawAnimals(sim);
+    }
     this.drawCreatures(sim, selected);
   }
 
   private drawTerrain(sim: Simulation): void {
     const { ctx, cam } = this;
     const w = sim.world;
+    const surface = this.layer === Layer.Surface;
     // Only draw the tiles inside the viewport.
     const [wx0, wy0] = cam.screenToWorld(0, 0);
     const [wx1, wy1] = cam.screenToWorld(cam.viewW, cam.viewH);
@@ -32,10 +40,22 @@ export class Renderer {
 
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
-        const tile = w.tileAt(tx, ty) as Tile;
         const [sx, sy] = cam.worldToScreen(tx * TILE, ty * TILE);
-        ctx.fillStyle = TILE_COLORS[tile];
-        ctx.fillRect(sx, sy, size, size);
+        if (surface) {
+          ctx.fillStyle = TILE_COLORS[w.tileAt(tx, ty) as Tile];
+          ctx.fillRect(sx, sy, size, size);
+          // Mark cave entrances with a dark dot.
+          if (w.isEntrance(tx, ty)) {
+            ctx.fillStyle = "#1a1622";
+            const r = size * 0.28;
+            ctx.beginPath();
+            ctx.arc(sx + size / 2, sy + size / 2, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else {
+          ctx.fillStyle = UNDER_COLORS[w.underAt(tx, ty) as Under];
+          ctx.fillRect(sx, sy, size, size);
+        }
       }
     }
   }
@@ -54,10 +74,63 @@ export class Renderer {
     }
   }
 
+  private drawTrees(sim: Simulation): void {
+    const { ctx, cam } = this;
+    for (const t of sim.trees) {
+      const [sx, sy] = cam.worldToScreen(t.x, t.y);
+      if (sx < -16 || sy < -16 || sx > cam.viewW + 16 || sy > cam.viewH + 16) continue;
+      const z = Math.max(0.5, cam.zoom);
+      const trunkH = (5 + t.maturity * 5) * z;
+      const crown = (3 + t.maturity * 5) * z;
+      // Trunk.
+      ctx.fillStyle = "#5b3d27";
+      ctx.fillRect(sx - z, sy - z, Math.max(1, 2 * z), trunkH);
+      // Canopy, with a hint of fruit when laden.
+      ctx.fillStyle = t.hasFood ? "#2f7d3a" : "#27632f";
+      ctx.beginPath();
+      ctx.arc(sx, sy - crown * 0.4, crown, 0, Math.PI * 2);
+      ctx.fill();
+      if (t.fruit > 2 && cam.zoom > 0.7) {
+        ctx.fillStyle = "#d65a7a";
+        ctx.beginPath();
+        ctx.arc(sx + crown * 0.4, sy - crown * 0.4, Math.max(1, z), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  private drawAnimals(sim: Simulation): void {
+    const { ctx, cam } = this;
+    const z = Math.max(0.6, cam.zoom);
+    for (const a of sim.animals) {
+      const [sx, sy] = cam.worldToScreen(a.x, a.y);
+      if (sx < -16 || sy < -16 || sx > cam.viewW + 16 || sy > cam.viewH + 16) continue;
+      const r = (a.species.diet === "carnivore" ? 5 : 4) * z * (a.isAdult ? 1 : 0.7);
+      ctx.fillStyle = a.species.color;
+      ctx.globalAlpha = 0.4 + a.health * 0.6;
+      // Carnivores drawn as diamonds, herbivores as circles.
+      if (a.species.diet === "carnivore") {
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - r);
+        ctx.lineTo(sx + r, sy);
+        ctx.lineTo(sx, sy + r);
+        ctx.lineTo(sx - r, sy);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
   private drawCreatures(sim: Simulation, selected: Creature | null): void {
     const { ctx, cam } = this;
     const baseR = 5 * Math.max(0.6, cam.zoom);
     for (const c of sim.creatures) {
+      if (c.layer !== this.layer) continue; // only show this level's people
       const [sx, sy] = cam.worldToScreen(c.x, c.y);
       if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
       const r = c.isAdult ? baseR : baseR * 0.65;

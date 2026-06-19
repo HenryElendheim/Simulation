@@ -68,6 +68,9 @@ html, body {
   font: inherit;
 }
 .speed button.active, .tabs button.active { background: var(--accent); color: #07120f; border-color: var(--accent); }
+.layer-toggle { display: flex; gap: 4px; }
+.layer-toggle button { background: #1b212b; color: var(--text); border: 1px solid var(--panel-border); border-radius: 6px; padding: 5px 9px; cursor: pointer; font: inherit; }
+.layer-toggle button.active { background: var(--accent-2); color: #1a1206; border-color: var(--accent-2); }
 .readout { color: var(--muted); }
 
 /* Tools */

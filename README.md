@@ -18,12 +18,19 @@ Other scripts: `npm run build` (typecheck + production build),
 
 ## What's in the world
 
-- **An island** generated from a seed (radial falloff + fractal noise), with
-  deep water, shallows, sand, grass, forest, rock and snow. Resizable — bump
+- **A two-layer island** generated from a seed. The **surface** has deep water,
+  shallows, sand, grass, forest, rock and snow; the **underground** is a cave
+  layer of stone, caverns, underground pools and ore. Toggle ☀ Surface / ⛏ Below
+  in the top bar to look above or below ground. Resizable — bump
   `DEFAULT_WORLD_W/H` in `src/config.ts` for a bigger play area.
-- **Creatures** with needs (hunger, thirst, energy, health) driven by a simple
-  utility AI: they seek food and water, rest, wander, pair up and breed, and
-  eventually die of starvation, thirst or old age.
+- **Trees** dot the grass and forest, bearing fruit (food) and holding wood.
+- **People** (the speaking tribes) with needs (hunger, thirst, energy, health)
+  and a utility AI: they top up on food and water, rest, wander, breed, flee
+  predators, hunt game when plants are scarce, and — when they feel like it —
+  **dig** shafts and tunnels to explore the caves below.
+- **A food chain of base creatures:** plants → **grazers** (herbivores that eat
+  grass and flee) → **hunter-beasts** (carnivores that stalk and pounce). Herds
+  and packs form, breed, and rise and fall the way predator/prey populations do.
 - **Tribes**, each with its own colour and its own invented language.
 
 ## Emergent language (the headline feature)
@@ -46,17 +53,21 @@ dictionary (word → meaning), and watch creatures speak in little bubbles.
 | 🍒 Bless Food | Grow food bushes where you click |
 | ✨ Create | Shape a new creature into the world |
 | 👥 New People | Found a whole new tribe with its own language |
+| 🦌 Herbivore | Place a grazer (prey) |
+| 🐺 Carnivore | Place a hunter-beast (predator) |
+| ⛏️ Dig | Carve rock on the layer you're viewing (Surface opens a cave shaft) |
 | ⚡ Smite | Call down fire — creatures may die (chaos) |
 | ⛰️ Raise / 🌊 Lower | Reshape the land itself |
 
 Drag to pan, scroll to zoom. Use the speed buttons (top) to pause or fast-forward
-time, and the **Chronicle** tab to read the history of the world.
+time, the ☀/⛏ toggle to switch between surface and underground, and the
+**Chronicle** tab to read the history of the world.
 
 ## Where this can go next
 
-Hunting and predators, gathering & building structures, weather and seasons,
-grammar (multi-word sentences from learned words), trade and conflict between
-tribes, saving/loading worlds, and larger maps.
+Building structures from wood/stone, cave-dwelling species and ore mining,
+weather and seasons, grammar (multi-word sentences from learned words), trade and
+conflict between tribes, saving/loading worlds, and larger maps.
 
 ## Project layout
 

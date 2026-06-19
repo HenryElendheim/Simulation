@@ -1,9 +1,10 @@
-import { Creature as C, Needs, SECONDS_PER_DAY, TILE } from "./config";
+import { Creature as C, Dig, Needs, SECONDS_PER_DAY, TILE } from "./config";
 import { CONCEPTS } from "./language";
 import type { ConceptId, Tribe } from "./language";
 import type { Simulation } from "./sim";
-import { isWater, Tile } from "./world";
-import type { FoodSource } from "./resources";
+import type { Animal } from "./animal";
+import { Layer, Tile, Under } from "./world";
+import type { Edible } from "./resources";
 
 export type Action =
   | "wander"
@@ -12,6 +13,9 @@ export type Action =
   | "seekWater"
   | "drink"
   | "sleep"
+  | "flee"
+  | "hunt"
+  | "dig"
   | "socialize";
 
 let NEXT_ID = 1;
@@ -42,9 +46,17 @@ export class Creature {
    * fetch food/water again moments later.
    */
   private goal: "none" | "food" | "water" = "none";
+  /** Which map level the creature is currently on. */
+  layer = Layer.Surface;
   targetX = 0;
   targetY = 0;
-  targetFood: FoodSource | null = null;
+  targetFood: Edible | null = null;
+  /** Prey being hunted (people are omnivores and may hunt herbivores). */
+  private prey: Animal | null = null;
+  /** Progress (seconds) toward breaking the current rock tile while digging. */
+  private digEffort = 0;
+  private digTX = 0;
+  private digTY = 0;
 
   /** Concepts this individual personally knows the word for. */
   vocabulary = new Set<ConceptId>();
@@ -108,15 +120,33 @@ export class Creature {
 
     const tx = Math.floor(this.x / TILE);
     const ty = Math.floor(this.y / TILE);
-    const here = sim.world.tileAt(tx, ty);
-    if (here === Tile.Sand) sim.experience(this, "sand");
-    if (here === Tile.Forest) sim.experience(this, "tree");
-    if (here === Tile.Rock || here === Tile.Snow) sim.experience(this, "rock");
+
+    if (this.layer === Layer.Underground) {
+      // The world below feels different and gets its own words.
+      sim.experience(this, "cave");
+      sim.experience(this, "dark");
+      sim.experience(this, "rock");
+    } else {
+      const here = sim.world.tileAt(tx, ty);
+      if (here === Tile.Sand) sim.experience(this, "sand");
+      if (here === Tile.Forest) sim.experience(this, "tree");
+      if (here === Tile.Rock || here === Tile.Snow) sim.experience(this, "rock");
+      if (sim.nearestTree(this.x, this.y, C.senseRadius)) sim.experience(this, "tree");
+    }
 
     if (sim.nearestWaterTile(this.x, this.y, C.senseRadius)) sim.experience(this, "water");
-    if (sim.nearestFood(this.x, this.y, C.senseRadius)) sim.experience(this, "food");
+    if (sim.nearestFood(this.x, this.y, C.senseRadius, this.layer)) sim.experience(this, "food");
+
+    // Beasts of the food chain: kin teach each other, predators are danger.
+    const threat = sim.nearestThreat(this.x, this.y, C.senseRadius);
+    if (threat) {
+      sim.experience(this, "beast");
+      sim.experience(this, "danger");
+      sim.experience(this, "bad");
+    }
 
     for (const other of sim.nearbyCreatures(this, C.senseRadius)) {
+      if (other.layer !== this.layer) continue;
       if (other.tribe.id === this.tribe.id) {
         sim.experience(this, "friend");
         // Teach each other: spread one unknown word per encounter.
@@ -143,6 +173,30 @@ export class Creature {
     // Finish sleeping only once rested.
     if (this.action === "sleep" && this.energy < 0.95) return;
 
+    // Survival first: run from any predator that's hunting nearby.
+    const threat = sim.nearestThreat(this.x, this.y, C.fleeSense);
+    if (threat) {
+      this.action = "flee";
+      this.targetX = this.x + (this.x - threat.x) * 4;
+      this.targetY = this.y + (this.y - threat.y) * 4;
+      return;
+    }
+
+    // Stuck underground while hungry/thirsty? Head for the nearest way up.
+    if (this.layer === Layer.Underground && (this.hunger > C.hungerUrge || this.thirst > C.thirstUrge)) {
+      const e = sim.nearestEntrance(this.x, this.y);
+      if (e) {
+        if (dist(this.x, this.y, e.x, e.y) < TILE) {
+          this.layer = Layer.Surface;
+        } else {
+          this.action = "wander";
+          this.targetX = e.x;
+          this.targetY = e.y;
+          return;
+        }
+      }
+    }
+
     // Drop a goal once the need is nearly fully topped up.
     if (this.goal === "water" && this.thirst <= C.satedThirst) this.goal = "none";
     if (this.goal === "food" && this.hunger <= C.satedHunger) this.goal = "none";
@@ -165,7 +219,18 @@ export class Creature {
       this.goal = "none"; // nowhere to drink — give up for now
     }
     if (this.goal === "food") {
-      const f = sim.nearestFood(this.x, this.y, 800);
+      const f = sim.nearestFood(this.x, this.y, 800, this.layer);
+      // Omnivores prefer gathering plants; they only hunt game as a fallback
+      // when no plant food is nearby (keeps herbivore herds from being wiped).
+      const foodFar = !f || dist(this.x, this.y, f.x, f.y) > C.senseRadius * 2;
+      const game = this.layer === Layer.Surface && foodFar ? sim.nearestHuntable(this.x, this.y, C.senseRadius) : null;
+      if (game) {
+        this.prey = game;
+        this.action = "hunt";
+        this.targetX = game.x;
+        this.targetY = game.y;
+        return;
+      }
       if (f) {
         this.targetFood = f;
         this.targetX = f.x;
@@ -182,7 +247,45 @@ export class Creature {
     }
     if (this.action === "sleep" && this.energy >= 0.95) this.action = "wander";
 
-    if (this.action !== "wander" || sim.timeDays > this.wanderUntil) this.pickWander(sim);
+    // Content and idle (well-fed, rested): sometimes explore caves or dig.
+    const content = this.hunger < 0.4 && this.thirst < 0.4 && this.energy > 0.5;
+    if (content && this.action !== "dig") {
+      const tx = Math.floor(this.x / TILE);
+      const ty = Math.floor(this.y / TILE);
+      if (this.layer === Layer.Surface && sim.world.isEntrance(tx, ty) && sim.rng.chance(Dig.exploreUrge)) {
+        this.layer = Layer.Underground; // climb down a known hole to explore
+      } else if (sim.rng.chance(Dig.idleUrge)) {
+        this.beginDig(sim, tx, ty);
+        return;
+      }
+    }
+
+    if (this.action !== "wander" && this.action !== "dig") this.pickWander(sim);
+    if (this.action === "wander" && sim.timeDays > this.wanderUntil) this.pickWander(sim);
+  }
+
+  /** Choose a rock tile to break and switch to the dig action. */
+  private beginDig(sim: Simulation, tx: number, ty: number): void {
+    if (this.layer === Layer.Surface) {
+      // Sink a shaft straight down from where we stand.
+      this.digTX = tx;
+      this.digTY = ty;
+    } else {
+      // Tunnel into an adjacent solid tile, if any.
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      const solid = dirs
+        .map(([dx, dy]) => [tx + dx, ty + dy] as const)
+        .filter(([x, y]) => {
+          const u = sim.world.underAt(x, y);
+          return u === Under.Stone || u === Under.Ore;
+        });
+      if (!solid.length) return;
+      const [x, y] = sim.rng.pick(solid);
+      this.digTX = x;
+      this.digTY = y;
+    }
+    this.digEffort = 0;
+    this.action = "dig";
   }
 
   private pickWander(sim: Simulation): void {
@@ -218,12 +321,56 @@ export class Creature {
         }
         return;
       }
+      case "hunt": {
+        const p = this.prey;
+        if (!p || !p.alive || p.health <= 0) {
+          this.prey = null;
+          this.action = "wander";
+          return;
+        }
+        const d = dist(this.x, this.y, p.x, p.y);
+        if (d < 12) {
+          this.vx = this.vy = 0;
+          p.health = clamp01(p.health - 1.0 * dt);
+          sim.experience(this, "hunt");
+          if (p.health <= 0) {
+            sim.devour(this, p);
+            this.hunger = clamp01(this.hunger - 0.6);
+            sim.experience(this, "meat");
+            sim.experience(this, "good");
+            this.prey = null;
+            this.goal = this.hunger <= C.satedHunger ? "none" : "food";
+            this.action = "wander";
+          }
+        } else {
+          this.moveToward(sim, p.x, p.y, dt);
+        }
+        return;
+      }
+      case "dig": {
+        this.vx = this.vy = 0;
+        this.digEffort += dt;
+        sim.experience(this, "dig");
+        sim.experience(this, "rock");
+        if (this.digEffort >= Dig.effortPerTile) {
+          const wasSurface = this.layer === Layer.Surface;
+          const broke = sim.world.dig(this.layer, this.digTX, this.digTY);
+          if (broke && wasSurface) {
+            this.layer = Layer.Underground; // drop into the new shaft
+            sim.experience(this, "cave");
+            sim.experience(this, "dark");
+          }
+          this.digEffort = 0;
+          this.action = "wander";
+        }
+        return;
+      }
       default:
         this.moveToward(sim, this.targetX, this.targetY, dt);
     }
   }
 
-  /** Steer toward a target, never stepping onto water tiles. */
+  /** Steer toward a target, staying on tiles walkable for the current layer. */
   private moveToward(sim: Simulation, tx: number, ty: number, dt: number): void {
     const dx = tx - this.x;
     const dy = ty - this.y;
@@ -232,15 +379,16 @@ export class Creature {
       this.vx = this.vy = 0;
       return;
     }
-    const speed = this.isAdult ? C.speed : C.speed * 0.7;
+    let speed = this.isAdult ? C.speed : C.speed * 0.7;
+    if (this.action === "flee") speed *= C.fleeBoost; // sprint from predators
     const nx = this.x + (dx / d) * speed * dt;
     const ny = this.y + (dy / d) * speed * dt;
-    // Block movement into water; nudge along the passable axis instead.
-    const okX = !isWater(sim.world.tileAtPixel(nx, this.y));
-    const okY = !isWater(sim.world.tileAtPixel(this.x, ny));
+    // Block movement into impassable tiles (sea on the surface, rock below).
+    const okX = sim.world.walkable(this.layer, nx, this.y);
+    const okY = sim.world.walkable(this.layer, this.x, ny);
     if (okX) this.x = nx;
     if (okY) this.y = ny;
-    if (!okX && !okY) this.pickWander(sim); // cornered against the sea
+    if (!okX && !okY) this.pickWander(sim); // cornered: pick a new heading
     this.vx = okX ? dx / d : 0;
     this.vy = okY ? dy / d : 0;
   }
@@ -248,6 +396,11 @@ export class Creature {
   /** Pair with a well-fed tribe-mate to produce a child (population renewal). */
   private tryBreed(sim: Simulation): void {
     if (!this.eligibleToBreed(sim)) return;
+    // Carrying capacity: crowded areas don't breed (food gets stretched thin).
+    let kin = 0;
+    for (const n of sim.nearbyCreatures(this, C.crowdRadius)) {
+      if (n.tribe.id === this.tribe.id && ++kin >= C.crowdCap) return;
+    }
     for (const other of sim.nearbyCreatures(this, C.senseRadius)) {
       if (other.tribe.id !== this.tribe.id) continue;
       if (!other.eligibleToBreed(sim)) continue;
@@ -293,9 +446,13 @@ export class Creature {
       case "eat": say("eat", "food", "good"); break;
       case "seekWater": say("go", "water"); break;
       case "drink": say("drink", "water"); break;
+      case "flee": say("beast", "danger", "bad"); break;
+      case "hunt": say("hunt", "meat"); break;
+      case "dig": say("dig", "rock"); break;
       case "sleep": break;
       default:
-        if (this.hunger > 0.6) say("hunger", "bad");
+        if (this.layer === Layer.Underground && sim.rng.chance(0.3)) say("cave", "dark");
+        else if (this.hunger > 0.6) say("hunger", "bad");
         else if (sim.rng.chance(0.3)) say("friend");
     }
   }

@@ -1,4 +1,5 @@
-import { Creature as CC, Food, SECONDS_PER_DAY, TILE } from "./config";
+import { Animal } from "./animal";
+import { Creature as CC, Food, SECONDS_PER_DAY, SPECIES, Trees, TILE, type SpeciesDef } from "./config";
 import { Creature } from "./creature";
 import {
   CONCEPTS,
@@ -7,9 +8,9 @@ import {
   type ConceptId,
   type Tribe,
 } from "./language";
-import { FoodSource } from "./resources";
+import { FoodSource, Tree, type Edible } from "./resources";
 import { RNG } from "./rng";
-import { isLand, isWater, World } from "./world";
+import { isGrazable, isLand, isWater, Layer, World } from "./world";
 
 export interface LogEntry {
   day: number;
@@ -28,6 +29,8 @@ export class Simulation {
   tribes: Tribe[] = [];
   creatures: Creature[] = [];
   foods: FoodSource[] = [];
+  trees: Tree[] = [];
+  animals: Animal[] = [];
   timeDays = 0;
   log: LogEntry[] = [];
 
@@ -46,10 +49,24 @@ export class Simulation {
     this.tribes = [];
     this.creatures = [];
     this.foods = [];
+    this.trees = [];
+    this.animals = [];
 
     for (let i = 0; i < Food.startingBushes; i++) {
       const spot = this.randomBushSpot();
       if (spot) this.foods.push(new FoodSource(spot.x, spot.y));
+    }
+    for (let i = 0; i < Trees.startingTrees; i++) {
+      const spot = this.randomBushSpot();
+      if (spot) this.trees.push(new Tree(spot.x, spot.y, this.rng.range(0.5, 1)));
+    }
+
+    // Seed the food chain: herbivores graze, carnivores hunt them.
+    for (const sp of Object.values(SPECIES)) {
+      for (let i = 0; i < sp.startCount; i++) {
+        const land = this.world.randomLand(this.rng);
+        if (land) this.spawnAnimal(sp, land.x, land.y, this.rng.range(0, sp.maxAge * 0.6));
+      }
     }
 
     for (let t = 0; t < tribeCount; t++) {
@@ -85,30 +102,144 @@ export class Simulation {
     const dtDays = dt / SECONDS_PER_DAY;
 
     for (const f of this.foods) f.grow(dtDays);
+    for (const t of this.trees) t.grow(dtDays);
 
-    // Iterate over a snapshot so births/deaths during the tick are safe.
-    const snapshot = this.creatures;
-    for (let i = 0; i < snapshot.length; i++) {
-      const c = snapshot[i];
-      if (c.alive) c.update(this, dt);
-    }
+    // Iterate over snapshots so births/deaths during the tick are safe.
+    const cs = this.creatures;
+    for (let i = 0; i < cs.length; i++) if (cs[i].alive) cs[i].update(this, dt);
+
+    const as = this.animals;
+    for (let i = 0; i < as.length; i++) if (as[i].alive) as[i].update(this, dt);
+
     if (this.deadThisFrame) {
       this.creatures = this.creatures.filter((c) => c.alive);
+      this.animals = this.animals.filter((a) => a.alive);
       this.deadThisFrame = false;
     }
   }
 
   // ---- Perception helpers (queried by creatures) ---------------------------
 
-  nearestFood(x: number, y: number, radius: number): FoodSource | null {
-    let best: FoodSource | null = null;
+  /** Nearest edible (bush or tree fruit). Food only exists on the surface. */
+  nearestFood(x: number, y: number, radius: number, layer: Layer = Layer.Surface): Edible | null {
+    if (layer !== Layer.Surface) return null;
+    return this.nearestEdible(x, y, radius);
+  }
+
+  /** Nearest bush or fruiting tree with food available. */
+  nearestEdible(x: number, y: number, radius: number): Edible | null {
+    let best: Edible | null = null;
     let bestD = radius * radius;
-    for (const f of this.foods) {
-      if (!f.hasFood) continue;
-      const d = (f.x - x) ** 2 + (f.y - y) ** 2;
+    const scan = (list: Edible[]) => {
+      for (const e of list) {
+        if (!e.hasFood) continue;
+        const d = (e.x - x) ** 2 + (e.y - y) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = e;
+        }
+      }
+    };
+    scan(this.foods);
+    scan(this.trees);
+    return best;
+  }
+
+  /** Centre of the nearest grazable (grass/forest) tile — herbivore pasture. */
+  nearestGrassTile(x: number, y: number, radius: number): { x: number; y: number } | null {
+    const w = this.world;
+    const ctx = Math.floor(x / TILE);
+    const cty = Math.floor(y / TILE);
+    const r = Math.ceil(radius / TILE);
+    let best: { x: number; y: number } | null = null;
+    let bestD = Infinity;
+    for (let ty = cty - r; ty <= cty + r; ty++) {
+      for (let tx = ctx - r; tx <= ctx + r; tx++) {
+        if (!isGrazable(w.tileAt(tx, ty))) continue;
+        const px = (tx + 0.5) * TILE;
+        const py = (ty + 0.5) * TILE;
+        const d = (px - x) ** 2 + (py - y) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = { x: px, y: py };
+        }
+      }
+    }
+    return best;
+  }
+
+  nearestTree(x: number, y: number, radius: number): Tree | null {
+    let best: Tree | null = null;
+    let bestD = radius * radius;
+    for (const t of this.trees) {
+      const d = (t.x - x) ** 2 + (t.y - y) ** 2;
       if (d < bestD) {
         bestD = d;
-        best = f;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  /** Nearest living carnivore (a danger to herbivores and people). */
+  nearestThreat(x: number, y: number, radius: number): Animal | null {
+    return this.nearestAnimal(x, y, radius, (a) => a.species.diet === "carnivore");
+  }
+
+  /** Nearest living herbivore (huntable game). */
+  nearestHuntable(x: number, y: number, radius: number): Animal | null {
+    return this.nearestAnimal(x, y, radius, (a) => a.species.diet === "herbivore");
+  }
+
+  /**
+   * For carnivores: hunt herbivore game. The tribe people are the smart apex —
+   * predators leave them be, so people are limited by food and breeding, not by
+   * being eaten (which keeps a predator boom from wiping out the tribes).
+   */
+  nearestPrey(x: number, y: number, radius: number): Animal | Creature | null {
+    return this.nearestHuntable(x, y, radius);
+  }
+
+  private nearestAnimal(x: number, y: number, radius: number, pred: (a: Animal) => boolean): Animal | null {
+    let best: Animal | null = null;
+    let bestD = radius * radius;
+    for (const a of this.animals) {
+      if (!a.alive || !pred(a)) continue;
+      const d = (a.x - x) ** 2 + (a.y - y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+      }
+    }
+    return best;
+  }
+
+  /** Nearest adult of the same species (for finding a mate / forming packs). */
+  nearestSameSpecies(self: Animal, radius: number): Animal | null {
+    return this.nearestAnimal(self.x, self.y, radius, (a) => a.id !== self.id && a.isAdult && a.species.id === self.species.id);
+  }
+
+  *nearbyAnimals(self: Animal, radius: number): Generator<Animal> {
+    const r2 = radius * radius;
+    for (const a of this.animals) {
+      if (a === self || !a.alive) continue;
+      if ((a.x - self.x) ** 2 + (a.y - self.y) ** 2 <= r2) yield a;
+    }
+  }
+
+  /** Pixel centre of the nearest cave entrance, or null if none exist. */
+  nearestEntrance(x: number, y: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = Infinity;
+    for (const i of this.world.entrances) {
+      const tx = i % this.world.width;
+      const ty = Math.floor(i / this.world.width);
+      const px = (tx + 0.5) * TILE;
+      const py = (ty + 0.5) * TILE;
+      const d = (px - x) ** 2 + (py - y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = { x: px, y: py };
       }
     }
     return best;
@@ -185,6 +316,43 @@ export class Simulation {
     this.addLog(`A ${c.tribe.name} falls still — death.`, "doom");
   }
 
+  spawnAnimal(species: SpeciesDef, x: number, y: number, age: number): Animal | null {
+    if (isWater(this.world.tileAtPixel(x, y))) {
+      const land = this.world.randomLand(this.rng);
+      if (!land) return null;
+      x = land.x;
+      y = land.y;
+    }
+    const maxAge = species.maxAge * this.rng.range(0.7, 1.3);
+    const a = new Animal(x, y, species, maxAge);
+    a.age = age;
+    this.animals.push(a);
+    return a;
+  }
+
+  killAnimal(a: Animal, _cause: "nature" | "eaten"): void {
+    if (!a.alive) return;
+    a.alive = false;
+    this.deadThisFrame = true; // animal deaths are frequent, so we don't log them
+  }
+
+  /** A predator consumes prey: the prey dies; a slain person is a grim event. */
+  devour(predator: Animal | Creature, prey: Animal | Creature): void {
+    if (prey instanceof Animal) {
+      this.killAnimal(prey, "eaten");
+      return;
+    }
+    if (!prey.alive) return;
+    const who = predator instanceof Animal ? `a ${predator.species.name}` : `the ${predator.tribe.name}`;
+    prey.alive = false;
+    this.deadThisFrame = true;
+    for (const w of this.nearbyCreatures(prey, CC.senseRadius)) {
+      this.experience(w, "death");
+      this.experience(w, "danger");
+    }
+    this.addLog(`A ${prey.tribe.name} is slain by ${who}.`, "doom");
+  }
+
   // ---- God powers (called from UI) -----------------------------------------
 
   /** Drop a cluster of food bushes at a world point. */
@@ -242,6 +410,21 @@ export class Simulation {
       }
     }
     this.addLog(toll ? `Fire from the sky takes ${toll}.` : `Fire scorches the earth.`, "doom");
+  }
+
+  /** Conjure a beast of the given species at a point. */
+  divineBeast(x: number, y: number, speciesId: string): void {
+    const sp = SPECIES[speciesId];
+    if (!sp) return;
+    const a = this.spawnAnimal(sp, x, y, sp.maxAge * 0.25);
+    if (a) this.addLog(`The sky-being conjures a ${sp.name}.`, "divine");
+  }
+
+  /** Dig (or fill) at a point on the given layer — the divine "dig" power. */
+  divineDig(x: number, y: number, layer: Layer): void {
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    this.world.dig(layer, tx, ty);
   }
 
   /** Reshape terrain: dir = +1 raise, -1 lower. */
